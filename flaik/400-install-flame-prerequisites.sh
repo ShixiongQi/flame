@@ -49,3 +49,5 @@ function install_jq {
         echo "jq already installed. Skipping..."
     fi
 }
+
+install_ubuntu_prerequisites
