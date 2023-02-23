@@ -8,7 +8,7 @@ cd /mydata/flame/
 git checkout knative # Check to knative branch
 ```
 
-## 2 - Setting up Kubernetes master node (**node-0**)
+## 2 - Setting up Kubernetes (v1.19.0) master node (**node-0**)
 ```bash
 $ cd /mydata/flame/ && export MYMOUNT=/mydata
 
