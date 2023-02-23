@@ -23,6 +23,6 @@ To check the flame image built, run `docker images`
 
 To bring up flame and its dependent applications, `helm` is used. A shell script (`flame.sh`) to use helm is provided. Run the following command:
 ```bash
-$ cd /mydata/flame/flaik && ./403-flame.sh
+$ cd /mydata/flame/flaik && ./403-flame.sh start
 ```
 The above command ensures that the latest official flame image from docker hub is used. To use a locally developed image, add `--local-img` in the above command.
