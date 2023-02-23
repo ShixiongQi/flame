@@ -7,5 +7,6 @@ The following tools are sufficient: helm and jq. These tools can be installed by
 $ cd /mydata/flame/
 
 flame$ ./flaik/400-install-flame-prerequisites.sh
+flame$ ./flaik/401-setup-cert-manager.sh
 ```
 ## 2- Starting flame
