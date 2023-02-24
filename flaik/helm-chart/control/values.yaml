@@ -16,6 +16,8 @@
 
 ---
 mongodb:
+  persistence:
+    storageClass: flame-storage
   architecture: replicaset
   auth:
     enabled: false
