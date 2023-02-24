@@ -19,3 +19,4 @@ Follow steps below to set up flaik:
 * [Creating a multi-node cluster on Cloudlab](01-create-cluster-on-cloudlab.md)
 * [Setting up Kubernetes & Knative](02-setup-k8s-kn.md)
 * [Setting up Flame](03-setup-flame.md)
+* [Development environment setup](04-dev-setup.md)

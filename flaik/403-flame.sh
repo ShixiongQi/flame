@@ -19,7 +19,8 @@
 RELEASE_NAME=flame
 
 FILE_OF_INTEREST=helm-chart/control/values.yaml
-LINES_OF_INTEREST="27,34"
+# LINES_OF_INTEREST="27,34"
+LINES_OF_INTEREST="29,36"
 
 SED_MAC_FIX=
 if [[ "$OSTYPE" == "darwin"* ]]; then
