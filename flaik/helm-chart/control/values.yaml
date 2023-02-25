@@ -17,7 +17,9 @@
 ---
 mongodb:
   persistence:
-    storageClass: flame-storage
+    # storageClass: flame-storage
+    enabled: false
+    storageClass: nfs
   architecture: replicaset
   auth:
     enabled: false
@@ -90,6 +92,9 @@ ingress:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
     cert-manager.io/cluster-issuer: selfsigned
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
   # In mlflow, selfsigned certificate raises SSLCertVerificationError
   # So, fiab env disable tls; tls can be enabled with a legitimate cert
   annotationsMlflow:
@@ -98,6 +103,7 @@ ingress:
     # refer to https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/#custom-max-body-size
     # set nginx.ingress.kubernetes.io/proxy-body-size to 0 to disable the limit
     nginx.ingress.kubernetes.io/proxy-body-size: "512m"
+  httpsPort: 31827
 
 frontDoorUrl:
   apiserver: apiserver.flame.test
