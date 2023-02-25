@@ -60,7 +60,7 @@ Python 3.9.6
 ## Creating flame config
 The following command creates `config.yaml` under `$HOME/.flame`.
 ```bash
-./build-config.sh
+./404-build-config.sh
 ```
 
 ## Building flamectl
