@@ -139,30 +139,30 @@ function post_start_config {
     #     echo "timeout 5" | sudo tee -a $resolver_file > /dev/null
     # fi
 
-    # add dns entry for flame.test domain  in coredns
-    tmp_file=tmp.bak
-    # step 1: save the current entry
-    kubectl get configmap coredns -n kube-system -o json | jq -r '.data."Corefile"' > $tmp_file
-    # step 2: remove empty lines
-    sed -i $SED_MAC_FIX '/^$/d' $tmp_file
+    # # add dns entry for flame.test domain  in coredns
+    # tmp_file=tmp.bak
+    # # step 1: save the current entry
+    # kubectl get configmap coredns -n kube-system -o json | jq -r '.data."Corefile"' > $tmp_file
+    # # step 2: remove empty lines
+    # sed -i $SED_MAC_FIX '/^$/d' $tmp_file
 
-    # step 3: append the dns entry for flame.test domain at the end of file
-    echo "flame.test:53 {" | tee -a $tmp_file > /dev/null
-    echo "    errors" | tee -a $tmp_file > /dev/null
-    echo "    cache 30" | tee -a $tmp_file > /dev/null
-    echo "    forward . $k8s_ip" | tee -a $tmp_file > /dev/null
-    echo "}" | tee -a $tmp_file > /dev/null
+    # # step 3: append the dns entry for flame.test domain at the end of file
+    # echo "flame.test:53 {" | tee -a $tmp_file > /dev/null
+    # echo "    errors" | tee -a $tmp_file > /dev/null
+    # echo "    cache 30" | tee -a $tmp_file > /dev/null
+    # echo "    forward . $k8s_ip" | tee -a $tmp_file > /dev/null
+    # echo "}" | tee -a $tmp_file > /dev/null
 
-    # step 4: create patch file
-    echo "{\"data\": {\"Corefile\": $(jq -R -s '.' < $tmp_file)}}" > $tmp_file
+    # # step 4: create patch file
+    # echo "{\"data\": {\"Corefile\": $(jq -R -s '.' < $tmp_file)}}" > $tmp_file
 
-    # step 5: patch configmap of coredns with the updated dns entries
-    kubectl patch configmap coredns \
-        -n kube-system \
-        --type merge \
-        -p "$(cat $tmp_file)"
+    # # step 5: patch configmap of coredns with the updated dns entries
+    # kubectl patch configmap coredns \
+    #     -n kube-system \
+    #     --type merge \
+    #     -p "$(cat $tmp_file)"
 
-    rm -f $tmp_file $tmp_file$SED_MAC_FIX
+    # rm -f $tmp_file $tmp_file$SED_MAC_FIX
 }
 
 function stop {
@@ -208,32 +208,32 @@ function post_stop_cleanup {
     # fi
 
     # remove dns entry for flame.test domain in coredns
-    tmp_file=tmp.bak
-    # step 1: save the current entry
-    kubectl get configmap coredns -n kube-system -o json | jq -r '.data."Corefile"' > $tmp_file
+    # tmp_file=tmp.bak
+    # # step 1: save the current entry
+    # kubectl get configmap coredns -n kube-system -o json | jq -r '.data."Corefile"' > $tmp_file
 
-    sed -i $SED_MAC_FIX '/^$/d' $tmp_file
+    # sed -i $SED_MAC_FIX '/^$/d' $tmp_file
 
-    # patch coredns configmap only if flame.test domain section exists
-    if [[ "$(grep flame.test $tmp_file)" != "" ]]; then 
-        # remove last five lines
-        for i in {1..5}; do
-            sed -i $SED_MAC_FIX '$d' $tmp_file
-        done
+    # # patch coredns configmap only if flame.test domain section exists
+    # if [[ "$(grep flame.test $tmp_file)" != "" ]]; then 
+    #     # remove last five lines
+    #     for i in {1..5}; do
+    #         sed -i $SED_MAC_FIX '$d' $tmp_file
+    #     done
 
-        # step 4: create patch file
-        echo "{\"data\": {\"Corefile\": $(jq -R -s '.' < $tmp_file)}}" > $tmp_file
+    #     # step 4: create patch file
+    #     echo "{\"data\": {\"Corefile\": $(jq -R -s '.' < $tmp_file)}}" > $tmp_file
 
-        # step 5: patch configmap of coredns with the updated dns entries
-        kubectl patch configmap coredns \
-            -n kube-system \
-            --type merge \
-            -p "$(cat $tmp_file)"
+    #     # step 5: patch configmap of coredns with the updated dns entries
+    #     kubectl patch configmap coredns \
+    #         -n kube-system \
+    #         --type merge \
+    #         -p "$(cat $tmp_file)"
 
-        echo "removed flame.test domain section from coredns"
-    fi
+    #     echo "removed flame.test domain section from coredns"
+    # fi
 
-    rm -f $tmp_file $tmp_file$SED_MAC_FIX
+    # rm -f $tmp_file $tmp_file$SED_MAC_FIX
 }
 
 function main {
