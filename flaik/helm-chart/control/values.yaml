@@ -17,9 +17,8 @@
 ---
 mongodb:
   persistence:
-    # storageClass: flame-storage
     enabled: false
-    storageClass: nfs
+    storageClass: nfs # storageClass: flame-storage
   architecture: replicaset
   auth:
     enabled: false
@@ -104,6 +103,7 @@ ingress:
     # set nginx.ingress.kubernetes.io/proxy-body-size to 0 to disable the limit
     nginx.ingress.kubernetes.io/proxy-body-size: "512m"
   httpsPort: 31827
+  httpPort: 30539
 
 frontDoorUrl:
   apiserver: apiserver.flame.test
