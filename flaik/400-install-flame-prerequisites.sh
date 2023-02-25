@@ -19,6 +19,8 @@ function install_ubuntu_prerequisites {
     install_helm
 
     install_jq
+
+    install_ingress
 }
 
 function install_helm {
@@ -48,6 +50,15 @@ function install_jq {
     else
         echo "jq already installed. Skipping..."
     fi
+}
+
+function install_ingress {
+    echo "Installing NGINX ingress"
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.1.3/deploy/static/provider/baremetal/deploy.yaml
+
+    echo "NGINX Ingress NodePort:"
+    kubectl get svc ingress-nginx-controller -n ingress-nginx
+    echo "Update NodePort values in control/values.yaml"
 }
 
 install_ubuntu_prerequisites
