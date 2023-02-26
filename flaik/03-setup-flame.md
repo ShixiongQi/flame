@@ -58,7 +58,7 @@ flaik$ kubectl apply -f mongodb-1-pv.yaml
 
 ### 2.2 - Configure coreDNS in Kubernetes
 Add `MASTER_NOTE_IP` and `apiserver.flame.test` to /etc/hosts. See example below:
-- Note: Need to check whether this needs to be done for every worker node.
+- Note: This is only required for running `flamectl`, typically on **master node**
 ```bash
 127.0.0.1       localhost loghost localhost.sqi009-148108.kkprojects-pg0.utah.cloudlab.us
 10.10.1.1       node0-link-1 node0-0 node0
@@ -70,6 +70,7 @@ Add `MASTER_NOTE_IP` and `apiserver.flame.test` to /etc/hosts. See example below
 ```
 
 Applying patch to `host{ ... }` in `coredns` ConfigMap. See example below:
+- Run `kubectl edit configmap coredns -n kube-system`
 - Note: This step should be automated
 ```json
 apiVersion: v1
