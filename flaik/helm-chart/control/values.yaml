@@ -114,12 +114,22 @@ mlflow:
   s3EndpointUrl: http://minio.flame.test
   servicePort: "5000"
 
+# The default deployer is used to deploy aggregation service in Knative
 deployerDefault:
   adminId: "admin-1"
   region: "default/us"
   computeId: "default"
   apiKey: "apiKey-default"
   platform: "k8s"
+  namespace: "flame"
+
+# This deployer is used to deploy trainer pods
+deployerTrainer:
+  adminId: "admin-trainer"
+  region: "default/us"
+  computeId: "trainer"
+  apiKey: "apiKey-trainer"
+  platform: "k8s" # "k8s" is the only available option for now
   namespace: "flame"
 
 servicePort:
