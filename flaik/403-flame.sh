@@ -19,8 +19,7 @@
 RELEASE_NAME=flame
 
 FILE_OF_INTEREST=helm-chart/control/values.yaml
-# LINES_OF_INTEREST="27,34"
-LINES_OF_INTEREST="29,36"
+LINES_OF_INTEREST="30,37" # This is used to uncomment Line#30-Line#37 in helm-chart/control/values.yaml
 
 SED_MAC_FIX=
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -111,33 +110,7 @@ function post_start_config {
 
     echo "set flame.test domain with $k8s_ip in route 53"
     resolver_file=/etc/hosts
-    echo "$k8s_ip flame.test" | sudo tee -a $resolver_file > /dev/null
-
-    # if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-	# os_id=$(grep '^ID=' /etc/os-release | sed 's/"//g' | cut -d= -f2)
-	# case $os_id in
-	#     "amzn")
-	# 	echo "set flame.test domain with $k8s_ip in route 53"
-	# 	;;
-	#     *)
-	# 	subnet=$(ip a show | grep br- | grep inet | awk '{print $2}')
-	# 	resolver_file=/etc/systemd/network/minikube.network
-	# 	echo "[Match]" | sudo tee $resolver_file > /dev/null
-	# 	echo "Name=br*" | sudo tee -a $resolver_file > /dev/null
-	# 	echo "[Network]" | sudo tee -a $resolver_file > /dev/null
-	# 	echo "Address=$subnet" | sudo tee -a $resolver_file > /dev/null
-	# 	echo "DNS=$k8s_ip" | sudo tee -a $resolver_file > /dev/null
-	# 	echo "Domains=~flame.test" | sudo tee -a $resolver_file > /dev/null
-	# 	sudo systemctl restart systemd-networkd
-	# 	;;
-	# esac
-    # elif [[ "$OSTYPE" == "darwin"* ]]; then
-    #     resolver_file=/etc/resolver/flame-test
-    #     echo "domain flame.test" | sudo tee $resolver_file > /dev/null
-    #     echo "nameserver $k8s_ip" | sudo tee -a $resolver_file > /dev/null
-    #     echo "search_order 1" | sudo tee -a $resolver_file > /dev/null
-    #     echo "timeout 5" | sudo tee -a $resolver_file > /dev/null
-    # fi
+    echo "$k8s_ip flame.test apiserver.flame.test" | sudo tee -a $resolver_file > /dev/null
 
     # # add dns entry for flame.test domain  in coredns
     # tmp_file=tmp.bak
@@ -190,23 +163,6 @@ function post_stop_cleanup {
     echo "Kubernetes API server IP: $k8s_ip"
     echo "remove flame.test domain from route 53"
 
-    # if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-	# os_id=$(grep '^ID=' /etc/os-release | sed 's/"//g' | cut -d= -f2)
-	# case $os_id in
-	#     "amzn")
-	# 	echo "remove flame.test domain from route 53"
-	# 	;;
-	#     *)
-	# 	resolver_file=/etc/systemd/network/minikube.network
-	# 	sudo rm -f $resolver_file
-	# 	sudo systemctl restart systemd-networkd
-	# 	;;
-	# esac
-    # elif [[ "$OSTYPE" == "darwin"* ]]; then
-    #     resolver_file=/etc/resolver/flame-test
-    #     sudo rm -f $resolver_file
-    # fi
-
     # remove dns entry for flame.test domain in coredns
     # tmp_file=tmp.bak
     # # step 1: save the current entry
@@ -252,24 +208,24 @@ function main {
 
 
     if [ "$verb" == "start" ]; then
-        pre_start_stop_check
-        local start_stop_check_res=$?
-        if [ $start_stop_check_res == 1 ]; then
+        # pre_start_stop_check
+        # local start_stop_check_res=$?
+        # if [ $start_stop_check_res == 1 ]; then
             init
             start $exposedb $tag
             post_start_config
-        else
-            echo "Exiting!"
-        fi
+        # else
+        #     echo "Exiting!"
+        # fi
     elif [ "$verb" == "stop" ]; then
-        pre_start_stop_check
-        local start_stop_check_res=$?
-        if [ $start_stop_check_res == 1 ]; then
+        # pre_start_stop_check
+        # local start_stop_check_res=$?
+        # if [ $start_stop_check_res == 1 ]; then
             stop
             post_stop_cleanup
-        else
-            echo "Exiting!"
-        fi
+        # else
+        #     echo "Exiting!"
+        # fi
     else
         echo "usage: ./flame.sh <start [--expose-db] [--local-img] | stop>"
     fi
