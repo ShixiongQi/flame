@@ -32,22 +32,6 @@ spec:
     spec:
       containers:
         - args:
-          - --apiserver
-          - "https://{{ .Values.frontDoorUrl.apiserver }}:{{ .Values.ingress.httpsPort }}"
-          - --notifier
-          - "{{ .Values.frontDoorUrl.notifier }}:{{ .Values.ingress.httpsPort }}"
-          - --adminid
-          - {{ .Values.deployerTrainer.adminId }}
-          - --region
-          - {{ .Values.deployerTrainer.region }}
-          - --computeid
-          - {{ .Values.deployerTrainer.computeId }}
-          - --apikey
-          - {{ .Values.deployerTrainer.apiKey }}
-          - --platform
-          - {{ .Values.deployerTrainer.platform }}
-          - --namespace
-          - {{ .Values.deployerTrainer.namespace }}
           {{ if .Values.insecure }}
           - "--insecure"
           {{ end }}
@@ -56,14 +40,19 @@ spec:
           imagePullPolicy: IfNotPresent
           name: {{ .Release.Name }}-deployer-trainer
           volumeMounts:
-            - mountPath: /flame/template
+            - mountPath: /etc/flame/deployer.yaml
+              name: config-volume
+              subPath: deployer.yaml
+
+            - mountPath: {{ .Values.deployerTrainer.jobTemplate.folder }}
               name: job-template-volume
       
       serviceAccountName: deployer
       volumes:
+        - name: config-volume
+          configMap:
+            name: {{ .Release.Name }}-deployer-trainer-configmap
+
         - name: job-template-volume
           configMap:
-            # *-deployer-job-configmap refers to job/job-agent.yaml.mustache
-            # Use it until resource_handler in flamelet being fixed
-            name: {{ .Release.Name }}-deployer-job-configmap
-            # name: {{ .Release.Name }}-deployer-trainer-configmap
+            name: {{ .Release.Name }}-deployer-trainer-job-configmap

@@ -18,19 +18,19 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .Release.Name }}-deployer-trainer-configmap
+  name: {{ .Release.Name }}-deployer-configmap
   namespace: {{ .Release.Namespace }}
 data:
   deployer.yaml: |
     ---
     apiserver: "https://{{ .Values.frontDoorUrl.apiserver }}:{{ .Values.ingress.httpsPort }}"
     notifier: "{{ .Values.frontDoorUrl.notifier }}:{{ .Values.ingress.httpsPort }}"
-    adminId: {{ .Values.deployerTrainer.adminId }}
-    region: {{ .Values.deployerTrainer.region }}
-    computeId: {{ .Values.deployerTrainer.computeId }}
-    apikey: {{ .Values.deployerTrainer.apiKey }}
-    platform: {{ .Values.deployerTrainer.platform }}
-    namespace: {{ .Values.deployerTrainer.namespace }}
+    adminId: {{ .Values.deployer.adminId }}
+    region: {{ .Values.deployer.region }}
+    computeId: {{ .Values.deployer.computeId }}
+    apikey: {{ .Values.deployer.apiKey }}
+    platform: {{ .Values.deployer.platform }}
+    namespace: {{ .Values.deployer.namespace }}
     jobTemplate:
-      folder: {{ .Values.deployerTrainer.jobTemplate.folder }}
-      file: {{ .Values.deployerTrainer.jobTemplate.file }}
+      folder: {{ .Values.deployer.jobTemplate.folder }}
+      file: {{ .Values.deployer.jobTemplate.file }}

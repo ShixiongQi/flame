@@ -115,13 +115,19 @@ mlflow:
   servicePort: "5000"
 
 # The default deployer is used to deploy aggregation service in Knative
-deployerDefault:
+deployer:
   adminId: "admin-1"
   region: "default/us"
   computeId: "default"
   apiKey: "apiKey-default"
   platform: "k8s"
   namespace: "flame"
+  jobTemplate:
+    folder: /flame/template
+    # to use a different template file, put the file in the "job" folder
+    # use its file name as the value of key "file".
+    # also, update the name in the templates/deployer-job-configmap.yaml
+    file: job-agent.yaml.mustache
 
 # This deployer is used to deploy trainer pods
 deployerTrainer:
@@ -131,6 +137,12 @@ deployerTrainer:
   apiKey: "apiKey-trainer"
   platform: "k8s" # "k8s" is the only available option for now
   namespace: "flame"
+  jobTemplate:
+    folder: /flame/template
+    # to use a different template file, put the file in the "job" folder
+    # use its file name as the value of key "file".
+    # also, update the name in the templates/deployer-job-configmap.yaml
+    file: job-trainer.yaml.mustache
 
 servicePort:
   apiserver: "10100"
