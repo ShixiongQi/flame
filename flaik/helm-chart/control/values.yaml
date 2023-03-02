@@ -127,7 +127,8 @@ deployer:
     # to use a different template file, put the file in the "job" folder
     # use its file name as the value of key "file".
     # also, update the name in the templates/deployer-job-configmap.yaml
-    file: job-agent.yaml.mustache
+    # file: job-agent.yaml.mustache
+    file: kn-service-aggregator.yaml.mustache
 
 # This deployer is used to deploy trainer pods
 deployerTrainer:

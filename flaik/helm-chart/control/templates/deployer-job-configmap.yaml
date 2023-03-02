@@ -46,5 +46,5 @@ data:
     # this holds true in fiab setting
     insecure: true
 
-  {{- (.Files.Glob "job/job-agent.yaml.mustache").AsConfig | nindent 2}}
-  # {{- (.Files.Glob "job/kn-service-aggregator.yaml.mustache").AsConfig | nindent 2}} # This is used to deploy the aggregator as a Knative service
+  # {{- (.Files.Glob "job/job-agent.yaml.mustache").AsConfig | nindent 2}}
+  {{- (.Files.Glob "job/kn-service-aggregator.yaml.mustache").AsConfig | nindent 2}} # This is used to deploy the aggregator as a Knative service
