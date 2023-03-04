@@ -3,7 +3,7 @@
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
-  name: {{ .Release.Namespace }}-aggregator-<% taskId %>
+  name: {{ .Release.Namespace }}-aggregator
   namespace: {{ .Release.Namespace }}
 spec:
   template:
@@ -32,7 +32,7 @@ spec:
           command: ["/usr/bin/flamelet"]
           image: <% imageLoc %>
           imagePullPolicy: IfNotPresent
-          name: {{ .Release.Namespace }}-agent-<% taskId %>
+          name: {{ .Release.Namespace }}-aggregator
 
           ports:
             - containerPort: {{ .Values.servicePort.agent }}
