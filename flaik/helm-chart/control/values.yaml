@@ -66,9 +66,9 @@ minio:
     hosts:
       - minio.flame.test
 
-imageName: ciscoresearch/flame
+imageName: shixiongqi/flame
 imageTag: latest
-workerImageName: ciscoresearch/flame
+workerImageName: shixiongqi/flame
 workerImageTag: latest
 
 broker:
@@ -102,8 +102,13 @@ ingress:
     # refer to https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/#custom-max-body-size
     # set nginx.ingress.kubernetes.io/proxy-body-size to 0 to disable the limit
     nginx.ingress.kubernetes.io/proxy-body-size: "512m"
-  httpsPort: 31827
-  httpPort: 30539
+  httpsPort: 32595
+  httpPort: 30773
+
+knative:
+  aggregatorUrl: flame-aggregator.flame.example.com
+  knIngressIp: 10.10.1.1
+  knIngressPort: "30918"
 
 frontDoorUrl:
   apiserver: apiserver.flame.test

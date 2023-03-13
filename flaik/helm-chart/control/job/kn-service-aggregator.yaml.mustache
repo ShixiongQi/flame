@@ -30,12 +30,18 @@ spec:
             - "--insecure"
             {{ end }}
           command: ["/usr/bin/flamelet"]
+        # - command: ["python3", "/flame-grpc-test/server.py"]
+          # command: ["/bin/bash", "-c", "--"]
+          # args: ["while true; do sleep 30; done;"]
           image: <% imageLoc %>
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           name: {{ .Release.Namespace }}-aggregator
 
           ports:
-            - containerPort: {{ .Values.servicePort.agent }}
+          - name: h2c
+            containerPort: {{ .Values.servicePort.agent }}
+            containerPort: 8080
+          # - containerPort: {{ .Values.servicePort.agent }}
 
           resources: # TODO: Need to determine the right resource allocation for a single aggregator pod
             limits:
@@ -58,6 +64,8 @@ spec:
               value: {{ .Values.accessKeyId }}
             - name: AWS_SECRET_ACCESS_KEY
               value: {{ .Values.secretAccessKey }}
+            - name: ROLE
+              value: "aggregator"
       # restartPolicy: Never # This is not allowed by Knative
 
       # affinity:

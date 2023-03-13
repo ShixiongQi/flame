@@ -22,8 +22,10 @@ spec:
             - "--insecure"
             {{ end }}
           command: ["/usr/bin/flamelet"]
+          # command: ["/bin/bash", "-c", "--"]
+          # args: ["while true; do sleep 30; done;"]
           image: <% imageLoc %>
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           name: {{ .Release.Namespace }}-trainer-<% taskId %>
 
           ports:
@@ -50,6 +52,14 @@ spec:
               value: {{ .Values.accessKeyId }}
             - name: AWS_SECRET_ACCESS_KEY
               value: {{ .Values.secretAccessKey }}
+            - name: AGGREGATOR_URL
+              value: {{ .Values.aggregatorUrl }}
+            - name: KN_INGRESS_IP
+              value: {{ .Values.knIngressIp }}
+            - name: KN_INGRESS_PORT
+              value: "{{ .Values.knIngressPort }}"
+            - name: ROLE
+              value: "trainer"
       restartPolicy: Never
 
       affinity:
