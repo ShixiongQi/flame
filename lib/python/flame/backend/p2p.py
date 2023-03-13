@@ -148,13 +148,26 @@ class PointToPointBackend(AbstractBackend):
         msg_pb2_grpc.add_BackendRouteServicer_to_server(
             BackendServicer(self), server)
 
-        ip_addr = socket.gethostbyname(socket.gethostname())
-        port = server.add_insecure_port(f'{ip_addr}:0')
+        role = os.environ['ROLE']
+        logger.info(f'Role of current compute: {role}')
+        if os.environ['ROLE'] == 'aggregator':
+            ip_addr = socket.gethostbyname(socket.gethostname())
+            port = 8080
+            server.add_insecure_port(f'[::]:{port}')
+            logger.info(f'Starting server. Listening on port {port}.')
 
-        self._backend = f'{ip_addr}:{port}'
-        logger.info(f'serving on {self._backend}')
-        await server.start()
-        await server.wait_for_termination()
+            self._backend = f'{ip_addr}:{port}'
+            logger.info(f'Aggregator serving on {self._backend}')
+            await server.start()
+            await server.wait_for_termination()
+        else:
+            ip_addr = socket.gethostbyname(socket.gethostname())
+            port = server.add_insecure_port(f'{ip_addr}:0')
+
+            self._backend = f'{ip_addr}:{port}'
+            logger.info(f'serving on {self._backend}')
+            await server.start()
+            await server.wait_for_termination()
 
     def configure(self, broker: str, job_id: str, task_id: str):
         """Configure the backend."""
