@@ -1,0 +1,13 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: warm-up-test
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+      - image: docker.io/shixiongqi/warm-up-test
+        env:
+        - name: TARGET
+          value: "Go Sample v1"
