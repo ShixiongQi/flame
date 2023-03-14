@@ -247,22 +247,23 @@ class PointToPointBackend(AbstractBackend):
                     _ingress_port = os.environ['KN_INGRESS_PORT']
                     endpoint = f'{_ingress_ip}:{_ingress_port}'
                     logger.info(f"connecting to endpoint: {endpoint}")
-                    await self._trainer_connect_and_notify_aggregator(endpoint, channel.name(), _aggregator_url)
+                    await self._trainer_connect_and_notify_aggregator(endpoint, channel, _aggregator_url)
                 elif channel.my_role() == 'aggregator':
-                    for endpoint in meta_resp.endpoints:
-                        logger.info(f"connecting to endpoint: {endpoint}")
-                        await self._aggregator_connect_and_notify_trainer(endpoint, channel.name())
+                    logger.info("Aggregator-side gRPC client has been disabled")
+                    # for endpoint in meta_resp.endpoints:
+                        # logger.info(f"connecting to endpoint: {endpoint}")
+                        # await self._aggregator_connect_and_notify_trainer(endpoint, channel)
                 else:
                     for endpoint in meta_resp.endpoints:
                         logger.info(f"connecting to endpoint: {endpoint}")
-                        await self._connect_and_notify(endpoint, channel.name())
+                        await self._connect_and_notify(endpoint, channel)
 
             while True:
                 meta_resp = stub.HeartBeat(meta_info)
                 logger.debug(f"meta_resp from heart beat: {meta_resp}")
                 await asyncio.sleep(HEART_BEAT_DURATION)
 
-    async def _connect_and_notify(self, endpoint: str, ch_name: str) -> None:
+    async def _connect_and_notify(self, endpoint: str, channel) -> None:
         grpc_ch = grpc.aio.insecure_channel(
             endpoint,
             options=[('grpc.max_send_message_length', GRPC_MAX_MESSAGE_LENGTH),
@@ -270,9 +271,9 @@ class PointToPointBackend(AbstractBackend):
                       GRPC_MAX_MESSAGE_LENGTH)])
         stub = msg_pb2_grpc.BackendRouteStub(grpc_ch)
 
-        await self.notify(ch_name, msg_pb2.NotifyType.JOIN, stub, grpc_ch)
+        await self.notify(channel, msg_pb2.NotifyType.JOIN, stub, grpc_ch)
 
-    async def _aggregator_connect_and_notify_trainer(self, endpoint: str, ch_name: str) -> None:
+    async def _aggregator_connect_and_notify_trainer(self, endpoint: str, channel) -> None:
         grpc_ch = grpc.aio.insecure_channel(
             endpoint,
             options=[('grpc.max_send_message_length', GRPC_MAX_MESSAGE_LENGTH),
@@ -280,9 +281,9 @@ class PointToPointBackend(AbstractBackend):
                       GRPC_MAX_MESSAGE_LENGTH)])
         stub = msg_pb2_grpc.BackendRouteStub(grpc_ch)
 
-        await self.notify(ch_name, msg_pb2.NotifyType.JOIN, stub, grpc_ch)
+        await self.notify(channel, msg_pb2.NotifyType.JOIN, stub, grpc_ch)
 
-    async def _trainer_connect_and_notify_aggregator(self, endpoint: str, ch_name: str, aggregator_url: str) -> None:
+    async def _trainer_connect_and_notify_aggregator(self, endpoint: str, channel, aggregator_url: str) -> None:
         grpc_ch = grpc.aio.insecure_channel(
             endpoint,
             options=[('grpc.default_authority', aggregator_url),
@@ -291,25 +292,44 @@ class PointToPointBackend(AbstractBackend):
                       GRPC_MAX_MESSAGE_LENGTH)])
         stub = msg_pb2_grpc.BackendRouteStub(grpc_ch)
 
-        await self.notify(ch_name, msg_pb2.NotifyType.JOIN, stub, grpc_ch)
+        await self.notify(channel, msg_pb2.NotifyType.JOIN, stub, grpc_ch)
 
-    async def notify(self, channel_name, notify_type, stub, grpc_ch) -> bool:
+    async def notify(self, channel, notify_type, stub, grpc_ch) -> bool:
         """Send a notify message to an end by using stub."""
-        if channel_name not in self._channels:
-            logger.debug(f'channel {channel_name} not found')
+        if channel.name() not in self._channels:
+            logger.debug(f'channel {channel.name()} not found')
             return False
 
         msg = msg_pb2.Notify(end_id=self._id,
-                             channel_name=channel_name,
+                             channel_name=channel.name(),
                              type=notify_type)
 
-        try:
-            resp = await stub.notify_end(msg)
-        except grpc.aio.AioRpcError as err:
-            logger.debug("can't proceed as grpc channel is unavailable")
-            logger.debug(err.details())
-            logger.debug('{}, {}'.format(err.code().name, err.code().value))
-            return False
+        if channel.my_role() == 'trainer':
+            while 1:
+                try:
+                    resp = await stub.notify_end(msg)
+                    break
+                except grpc.aio.AioRpcError as err:
+                    logger.debug("can't proceed as grpc channel is unavailable")
+                    # logger.debug(err.details())
+                    logger.debug('Error code name: {}'.format(err.code().name))
+                    logger.debug('Error code value: {}'.format(err.code().value[0]))
+                    if err.code().value[0] == 12:
+                        time.sleep(0.1)
+                        logger.debug('Trainer retries connecting to Aggregator')
+                        continue
+                    else:
+                        return False
+        else:
+            try:
+                resp = await stub.notify_end(msg)
+            except grpc.aio.AioRpcError as err:
+                logger.debug("can't proceed as grpc channel is unavailable")
+                # logger.debug(err.details())
+                logger.debug('Error code name: {}'.format(err.code().name))
+                logger.debug('Error code value: {}'.format(err.code().value[0]))
+                return False
+
 
         logger.debug(f"resp = {resp}")
         _ = await self._handle_notification(resp, stub, grpc_ch)
