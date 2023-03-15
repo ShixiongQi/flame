@@ -15,9 +15,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """PointToPoint Backend."""
 
-import os
 import asyncio
 import logging
+import os
 import socket
 import time
 from typing import AsyncIterable, Iterable
@@ -119,6 +119,7 @@ class PointToPointBackend(AbstractBackend):
         self._livecheck = {}
         self.delayed_channel_add = {}
         self.tx_tasks = []
+        self.dummy_client_task = None
 
         with background_thread_loop() as loop:
             self._loop = loop
@@ -215,6 +216,62 @@ class PointToPointBackend(AbstractBackend):
         task = asyncio.create_task(coro)
         self.tx_tasks.append(task)
 
+    def kill_dummy_client(self,
+                            channel_name: str,
+                            end_id: str) -> bool:
+        """Terminate the dummy client coroutine to stop sending dummy requests."""
+        if (channel_name not in self._channels):
+            logger.info(f'[kill_dummy_client()] Unknown {channel_name}')
+            return False
+        
+        was_cancelled = self.dummy_client_task.cancel()
+        logger.info(f'Dummy client was killed: {was_cancelled}')
+
+    def create_dummy_client(self,
+                            channel_name: str,
+                            end_id: str) -> bool:
+        """Create a dummy client for sending dummy requests to keep the aggregator warm."""
+        logger.info('Dummy client is being created in p2p backend')
+
+        if (channel_name not in self._channels):
+            logger.info(f'[create_dummy_client()] Unknown {channel_name}')
+            return False
+        
+        channel = self._channels[channel_name]
+
+        aggregator_url = os.environ['AGGREGATOR_URL']
+        ingress_ip = os.environ['KN_INGRESS_IP']
+        ingress_port = os.environ['KN_INGRESS_PORT']
+        endpoint = f'{ingress_ip}:{ingress_port}'
+
+        grpc_ch = grpc.aio.insecure_channel(
+            endpoint,
+            options=[('grpc.default_authority', aggregator_url),
+                     ('grpc.max_send_message_length', GRPC_MAX_MESSAGE_LENGTH),
+                     ('grpc.max_receive_message_length',
+                      GRPC_MAX_MESSAGE_LENGTH)])
+        stub = msg_pb2_grpc.BackendRouteStub(grpc_ch)
+
+        coro = self._dummy_client(channel, stub, grpc_ch)
+
+        self.dummy_client_task = asyncio.create_task(coro)
+        logger.info('dummy_client_task created')
+
+    async def _dummy_client(self, channel, stub, grpc_ch):
+        """HTTP client used to send dummy requests in a loop."""
+        logger.info('Here is within the dummy client')
+
+        while True:
+            logger.info("Aggregator sends a dummy request to itself")
+
+            try:
+                await self.notify(channel, msg_pb2.NotifyType.ACK, stub, grpc_ch)
+            except Exception as ex:
+                ex_name = type(ex).__name__
+                logger.info(f"An exception of type {ex_name} occurred")
+
+            await asyncio.sleep(15)
+
     def attach_channel(self, channel) -> None:
         """Attach a channel to backend."""
         self._channels[channel.name()] = channel
@@ -232,7 +289,7 @@ class PointToPointBackend(AbstractBackend):
                 endpoint=self._backend,
             )
 
-            logger.info(f"\n\n## meta_info ## {channel.job_id()}/{channel.name()}/{channel.my_role()}/{channel.other_role()}/{channel.groupby()}/{self._backend}\n\n")
+            # logger.info(f"\n\n## meta_info ## {channel.job_id()}/{channel.name()}/{channel.my_role()}/{channel.other_role()}/{channel.groupby()}/{self._backend}\n\n")
 
             meta_resp = stub.RegisterMetaInfo(meta_info)
             if meta_resp:
@@ -259,8 +316,9 @@ class PointToPointBackend(AbstractBackend):
                         await self._connect_and_notify(endpoint, channel)
 
             while True:
-                meta_resp = stub.HeartBeat(meta_info)
-                logger.debug(f"meta_resp from heart beat: {meta_resp}")
+                if channel.my_role() != 'aggregator':
+                    meta_resp = stub.HeartBeat(meta_info)
+                    logger.debug(f"meta_resp from heart beat: {meta_resp}")
                 await asyncio.sleep(HEART_BEAT_DURATION)
 
     async def _connect_and_notify(self, endpoint: str, channel) -> None:

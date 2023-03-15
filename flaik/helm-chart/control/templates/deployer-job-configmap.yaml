@@ -42,6 +42,10 @@ data:
     accessKeyId: {{ (index .Values.minio.users 0).accessKey }}
     secretAccessKey: {{ (index .Values.minio.users 0).secretKey }}
 
+    aggregatorUrl: {{ .Values.knative.aggregatorUrl }}
+    knIngressIp: {{ .Values.knative.knIngressIp }}
+    knIngressPort: {{ .Values.knative.knIngressPort }}
+
     # enable this in case a selfsigned cert is in use (for test only)
     # this holds true in fiab setting
     insecure: true

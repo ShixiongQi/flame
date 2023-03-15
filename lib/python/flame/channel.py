@@ -74,6 +74,20 @@ class Channel(object):
 
         _, _ = run_async(_setup(), self._backend.loop())
 
+    def run_dummy_client(self) -> None:
+        async def _dummy_client_setup():
+            logger.info('Run dummy client asynchronously')
+            self._backend.create_dummy_client(self._name, "")
+
+        _, _ = run_async(_dummy_client_setup(), self._backend.loop())
+
+    def terminate_dummy_client(self) -> None:
+        async def _dummy_client_kill():
+            logger.info('Killing dummy client asynchronously')
+            self._backend.kill_dummy_client(self._name, "")
+
+        _, _ = run_async(_dummy_client_kill(), self._backend.loop())
+
     def job_id(self) -> str:
         """Return job id."""
         return self._job_id

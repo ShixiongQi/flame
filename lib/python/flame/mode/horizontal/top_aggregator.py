@@ -109,6 +109,10 @@ class TopAggregator(Role, metaclass=ABCMeta):
         if not channel:
             return
 
+        if channel.my_role() == "aggregator":
+            logger.info("Aggregator creates a dummy client to keep itself warm")
+            channel.run_dummy_client()
+
         total = 0
         # receive local model parameters from trainers
         for end, msg in channel.recv_fifo(channel.ends()):
@@ -131,6 +135,9 @@ class TopAggregator(Role, metaclass=ABCMeta):
                 # save training result from trainer in a disk cache
                 self.cache[end] = tres
 
+        logger.info("[SQI009] Receive model updates from trainers is done")
+        # time.sleep(60) # Sleep longer than grace period
+
         # optimizer conducts optimization (in this case, aggregation)
         global_weights = self.optimizer.do(deepcopy(self.weights),
                                            self.cache,
@@ -139,12 +146,18 @@ class TopAggregator(Role, metaclass=ABCMeta):
             logger.debug("failed model aggregation")
             time.sleep(1)
             return
+        logger.info("[SQI009] aggregation is done")
 
         # set global weights
         self.weights = global_weights
 
         # update model with global weights
         self._update_model()
+        logger.info("[SQI009] _update_model is done")
+
+        if channel.my_role() == "aggregator":
+            logger.info("Aggregator terminates the dummy client to disable keep-warm")
+            channel.terminate_dummy_client()
 
     def put(self, tag: str) -> None:
         """Set data to remote role(s)."""
