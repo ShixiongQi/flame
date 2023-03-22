@@ -54,6 +54,7 @@ const (
 	workDir       = "/flame/work"
 	pythonBin     = "python3"
 	taskPyFile    = "main.py"
+	metaFile      = "meta.json"
 	logFilePrefix = "task"
 	logFileExt    = "log"
 
@@ -257,6 +258,13 @@ func (t *taskHandler) startJob(jobId string) {
 				zap.S().Warnf("Failed to prepare task")
 				return
 			}
+		}
+
+		metaFilePath := filepath.Join(workDir, metaFile)
+		if t.DownloadFile(metaFilePath, "metaFile") == 1 {
+			zap.S().Infof("Download meta.json to (%s)", metaFilePath)
+		} else {
+			zap.S().Infof("No meta.json on MongoDB. This could be 1st round")
 		}
 
 		go t.runTask()
@@ -468,7 +476,7 @@ func (t *taskHandler) runTask() {
 	t.updateTaskStatus(openapi.RUNNING, "")
 
 	getLog := func() string {
-		bytesToRead := 100000000
+		bytesToRead := 10000000000
 		log := ""
 		log, err = t.readLastNBytesFromFile(t.getLogfilePath(), bytesToRead)
 		if err != nil {
@@ -503,6 +511,10 @@ func (t *taskHandler) runTask() {
 		zap.S().Infof("Aggregator saves taskFile and configFile to MongoDB")
 		t.UploadFile(taskFilePath, "taskFile")
 		t.UploadFile(configFilePath, "configFile")
+
+		metaFilePath := filepath.Join(workDir, metaFile)
+		zap.S().Infof("Upload meta.json (%s)", metaFilePath)
+		t.UploadFile(metaFilePath, "metaFile")
 
 		// TODO: clean up mongoDB entry when training is done
 	}
