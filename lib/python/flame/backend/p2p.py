@@ -35,7 +35,7 @@ from .chunk_manager import ChunkManager
 from .chunk_store import ChunkStore
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+# logger.setLevel(logging.DEBUG)
 
 ENDPOINT_TOKEN_LEN = 2
 HEART_BEAT_DURATION = 30  # for metaserver
@@ -221,20 +221,20 @@ class PointToPointBackend(AbstractBackend):
                             end_id: str) -> bool:
         """Terminate the dummy client coroutine to stop sending dummy requests."""
         if (channel_name not in self._channels):
-            logger.info(f'[kill_dummy_client()] Unknown {channel_name}')
+            logger.debug(f'[kill_dummy_client()] Unknown {channel_name}')
             return False
         
         was_cancelled = self.dummy_client_task.cancel()
-        logger.info(f'Dummy client was killed: {was_cancelled}')
+        logger.debug(f'Dummy client was killed: {was_cancelled}')
 
     def create_dummy_client(self,
                             channel_name: str,
                             end_id: str) -> bool:
         """Create a dummy client for sending dummy requests to keep the aggregator warm."""
-        logger.info('Dummy client is being created in p2p backend')
+        logger.debug('Dummy client is being created in p2p backend')
 
         if (channel_name not in self._channels):
-            logger.info(f'[create_dummy_client()] Unknown {channel_name}')
+            logger.debug(f'[create_dummy_client()] Unknown {channel_name}')
             return False
         
         channel = self._channels[channel_name]
@@ -255,12 +255,10 @@ class PointToPointBackend(AbstractBackend):
         coro = self._dummy_client(channel, stub, grpc_ch)
 
         self.dummy_client_task = asyncio.create_task(coro)
-        logger.info('dummy_client_task created')
+        logger.debug('dummy_client_task created')
 
     async def _dummy_client(self, channel, stub, grpc_ch):
         """HTTP client used to send dummy requests in a loop."""
-        logger.info('Here is within the dummy client')
-
         while True:
             logger.info("Aggregator sends a dummy request to itself")
 
@@ -467,10 +465,8 @@ class PointToPointBackend(AbstractBackend):
         created first.
         """
         if comm_type == CommType.BROADCAST:
-            logger.info('broadcast message')
             await self._broadcast_task(channel)
         else:
-            logger.info('unicast message')
             await self._unicast_task(channel, end_id)
 
         logger.debug("_tx_task is done")
