@@ -60,6 +60,8 @@ spec:
               value: "{{ .Values.knIngressPort }}"
             - name: ROLE
               value: "trainer"
+            - name: GIT_PYTHON_REFRESH
+              value: "quiet"
       restartPolicy: Never
 
       affinity:
