@@ -76,14 +76,14 @@ class Channel(object):
 
     def run_dummy_client(self) -> None:
         async def _dummy_client_setup():
-            logger.info('Run dummy client asynchronously')
+            logger.debug('Run dummy client asynchronously')
             self._backend.create_dummy_client(self._name, "")
 
         _, _ = run_async(_dummy_client_setup(), self._backend.loop())
 
     def terminate_dummy_client(self) -> None:
         async def _dummy_client_kill():
-            logger.info('Killing dummy client asynchronously')
+            logger.debug('Killing dummy client asynchronously')
             self._backend.kill_dummy_client(self._name, "")
 
         _, _ = run_async(_dummy_client_kill(), self._backend.loop())
