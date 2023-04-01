@@ -163,14 +163,12 @@ class TopAggregator(Role, metaclass=ABCMeta):
             logger.debug("failed model aggregation")
             time.sleep(1)
             return
-        # logger.debug("[SQI009] aggregation is done")
 
         # set global weights
         self.weights = global_weights
 
         # update model with global weights
         self._update_model()
-        # logger.debug("[SQI009] _update_model is done")
 
         if channel.my_role() == "aggregator":
             logger.info("Aggregator terminates the dummy client to disable keep-warm")
@@ -320,7 +318,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
         """ Save states to MLflow """
         if self.model:
             logger.info(f"Top aggregator saves metadata of Round-{self._round} to local path.\n\n")
-            model_name = f"{self.config.job.name}-{self.config.job.job_id}""
+            model_name = f"{self.config.job.name}-{self.config.job.job_id}"
             self._save_meta(self._round, self._version, model_name)
 
     def _save_meta(self, _round: int, _version: str, _model_name: str) -> None:
