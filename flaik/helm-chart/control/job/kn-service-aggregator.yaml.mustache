@@ -29,10 +29,10 @@ spec:
             {{ if .Values.insecure }}
             - "--insecure"
             {{ end }}
-          command: ["/usr/bin/flamelet"]
+          # command: ["/usr/bin/flamelet"]
         # - command: ["python3", "/flame-grpc-test/server.py"]
-          # command: ["/bin/bash", "-c", "--"]
-          # args: ["while true; do sleep 30; done;"]
+          command: ["/bin/bash", "-c", "--"]
+          args: ["while true; do sleep 30; done;"]
           image: <% imageLoc %>
           imagePullPolicy: Always
           name: {{ .Release.Namespace }}-aggregator
@@ -74,6 +74,8 @@ spec:
               value: "aggregator"
             - name: GIT_PYTHON_REFRESH
               value: "quiet"
+            - name: TF_CPP_MIN_LOG_LEVEL
+              value: "3"
       # restartPolicy: Never # This is not allowed by Knative
 
       # affinity:
