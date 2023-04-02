@@ -12,8 +12,8 @@
     },
     "priority": "low",
 
-    "backend": "mqtt",
-    "maxRunTime": 1800,
+    "backend": "p2p",
+    "maxRunTime": 180000000,
 
     "baseModel": {
         "name": "",
