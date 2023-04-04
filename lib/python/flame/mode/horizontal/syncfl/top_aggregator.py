@@ -15,6 +15,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """horizontal FL top level aggregator."""
 
+import os, json
 import logging
 import time
 from copy import deepcopy
@@ -99,6 +100,12 @@ class TopAggregator(Role, metaclass=ABCMeta):
         self._rounds = self.config.hyperparameters.rounds
         self._work_done = False
 
+        # Used to track unreceived ends in recv_fifo()
+        self.registered_ends = None
+        self.received_ends = []
+
+        self.load_states() #NOTE: local states (round no., mdoel version, model name) from local path
+
         self.framework = get_ml_framework_in_use()
         if self.framework == MLFramework.UNKNOWN:
             raise NotImplementedError(
@@ -111,6 +118,10 @@ class TopAggregator(Role, metaclass=ABCMeta):
         if tag == TAG_AGGREGATE:
             self._aggregate_weights(tag)
 
+    def remaining_ends(self) -> list[str]:
+        """Get a list of unreceived ends."""
+        return list(set(self.registered_ends) - set(self.received_ends))
+
     def _aggregate_weights(self, tag: str) -> None:
         channel = self.cm.get_by_tag(tag)
         if not channel:
@@ -118,6 +129,8 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
         total = 0
         # receive local model parameters from trainers
+        #TODO: Take a diff and get the the endpoints (trainers) that haven't uploaded their model updates. This is required for Sync-FL and Semi-sync FL
+        # for end, msg in channel.recv_fifo(self.remaining_ends()):
         for msg, metadata in channel.recv_fifo(channel.ends()):
             end, _ = metadata
             if not msg:
@@ -133,11 +146,21 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
             logger.debug(f"{end}'s parameters trained with {count} samples")
 
+            # logger.info(f"Adding {end} to received list")
+            # self.received_ends.append(end)
+
             if weights is not None and count > 0:
                 total += count
                 tres = TrainResult(weights, count)
                 # save training result from trainer in a disk cache
                 self.cache[end] = tres
+                #TODO: Save cache to DB
+
+        if channel.my_role() == "aggregator":
+            logger.info("Aggregator creates a dummy client to keep itself warm")
+            channel.run_dummy_client()
+        
+        # time.sleep(60) # Sleep longer than grace period
 
         # optimizer conducts optimization (in this case, aggregation)
         global_weights = self.optimizer.do(
@@ -157,11 +180,16 @@ class TopAggregator(Role, metaclass=ABCMeta):
         # update model with global weights
         self._update_model()
 
+        if channel.my_role() == "aggregator":
+            logger.info("Aggregator terminates the dummy client to disable keep-warm")
+            channel.terminate_dummy_client()
+
     def put(self, tag: str) -> None:
         """Set data to remote role(s)."""
         if tag == TAG_DISTRIBUTE:
             self.dist_tag = tag
             self._distribute_weights(tag)
+        #TODO: Record the endpoints (trainers) for which the aggregator has distributed weights. This is required for Sync-FL and Semi-sync FL
 
     def _distribute_weights(self, tag: str) -> None:
         channel = self.cm.get_by_tag(tag)
@@ -187,6 +215,8 @@ class TopAggregator(Role, metaclass=ABCMeta):
                     MessageType.ROUND: self._round,
                 },
             )
+            # logger.info(f"Add registered endpoint: {end}")
+            # self.registered_ends.append(end) # = channel.ends()
 
     def inform_end_of_training(self) -> None:
         """Inform all the trainers that the training is finished."""
@@ -224,6 +254,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
         logger.debug(f"Incrementing current round: {self._round}")
         logger.debug(f"Total rounds: {self._rounds}")
         self._round += 1
+        self.save_states() #NOTE: save states (ended round no., model version, model name) to local path
         self._work_done = self._round > self._rounds
 
         channel = self.cm.get_by_tag(self.dist_tag)
@@ -243,8 +274,10 @@ class TopAggregator(Role, metaclass=ABCMeta):
     def save_model(self):
         """Save model in a model registry."""
         if self.model:
+            logger.info(f"Top aggregator saves model aggregated in Round-{self._round} to registry.")
             model_name = f"{self.config.job.name}-{self.config.job.job_id}"
             self.registry_client.save_model(model_name, self.model)
+            self._version = f"{self._round}"
 
     def update_metrics(self, metrics: dict[str, float]):
         """Update metrics."""
@@ -261,6 +294,64 @@ class TopAggregator(Role, metaclass=ABCMeta):
             self.weights = self.model.state_dict()
         elif self.framework == MLFramework.TENSORFLOW:
             self.weights = self.model.get_weights()
+
+    def load_states(self):
+        """ Load states from local path """
+
+        meta_json = self._load_meta("/flame/work/meta.json")
+        if meta_json is not None:
+            logger.info(f"Top aggregator loads meta info.")
+            self._round   = meta_json["training-round"]
+            self._version = meta_json["model-version"]
+            self._rounds = self._rounds + self._round #NOTE: This is a trick for debugging purpose.
+
+        if self.model is None and self._round is not 1:
+            model_name = f"{self.config.job.name}-{self.config.job.job_id}"
+
+            logger.info(f"Top aggregator loads models from MLflow - Model name: {model_name} - version: {self._version}")
+            self.model = self.registry_client.load_model(model_name, self._version)
+
+    def _load_meta(self, meta_path: str) -> dict:
+        """ Load metadata from /flame/work/meta.json """
+        logger.info(f"Top aggregator loads metadata /flame/work/meta.json")
+
+        path = "/flame/work/" #TODO: move to util.py
+        dir_list = os.listdir(path)
+
+        logger.info(f"Files and directories in {path}: {dir_list}")
+        if "config" in dir_list:
+            logger.info(f"config is under {path}")
+
+        if "meta.json" not in dir_list:
+            logger.info(f"meta.json is not under {path}")
+            return None
+        else:
+            with open(meta_path) as f:
+                return json.loads(f.read()) # return meta_json
+
+    def save_states(self):
+        """ Save states to MLflow """
+        if self.model:
+            logger.info(f"Top aggregator saves metadata of Round-{self._round} to local path.\n\n")
+            model_name = f"{self.config.job.name}-{self.config.job.job_id}"
+            self._save_meta(self._round, self._version, model_name)
+
+    def _save_meta(self, _round: int, _version: str, _model_name: str) -> None:
+        """Save metadata to /flame/work/meta.json """
+        meta_path = "/flame/work/meta.json"
+
+        dictionary = {
+            "training-round": _round,
+            "model-version": _version,
+            "model-name": _model_name
+            }
+
+        json_object = json.dumps(dictionary, indent = 4)
+
+        with open(meta_path, "w") as outfile:
+            outfile.write(json_object)
+
+        logger.info(f"metadata has been updated to {meta_path}.")
 
     def compose(self) -> None:
         """Compose role with tasklets."""
@@ -306,11 +397,11 @@ class TopAggregator(Role, metaclass=ABCMeta):
                 >> task_eval
                 >> task_analysis
                 >> task_save_metrics
+                >> task_save_model
                 >> task_increment_round
             )
             >> task_end_of_training
             >> task_save_params
-            >> task_save_model
         )
 
     def run(self) -> None:

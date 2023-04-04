@@ -114,6 +114,19 @@ class Trainer(Role, metaclass=ABCMeta):
         end = channel.one_end(VAL_CH_STATE_RECV)
         msg, _ = channel.recv(end)
 
+        if msg is None:
+            logger.info("Aggregator must be disconnected! Try to re-establish the connection with Aggregator")
+            self.cm.cleanup()
+            self.cm._loop.stop()
+            del self.cm #NOTE: This is the key step
+
+            self.cm = ChannelManager()
+            self.cm(self.config)
+            self.cm.join_all()
+
+            self.get(TAG_FETCH)
+            return
+
         if MessageType.WEIGHTS in msg:
             self.weights = weights_to_model_device(msg[MessageType.WEIGHTS], self.model)
             self._update_model()
@@ -140,7 +153,28 @@ class Trainer(Role, metaclass=ABCMeta):
             return
 
         # this call waits for at least one peer to join this channel
-        channel.await_join()
+        timeouted = channel.await_join(1)
+        if timeouted:
+            logger.info("Aggregator must be disconnected! Try to re-establish the connection with Aggregator")
+
+            # DO ChannelManager cleanup for _send_weights
+            self.cm.cleanup()
+            self.cm._loop.stop()
+            del self.cm #NOTE: This is the key step
+
+            # CREATE a new ChannelManager object
+            self.cm = ChannelManager()
+            self.cm(self.config)
+            self.cm.join_all()
+
+            channel = self.cm.get_by_tag(tag)
+            if not channel:
+                logger.debug(f"[_send_weights] channel not found with {tag}")
+                return
+
+            channel.await_join()
+            #NOTE: at this point, there should be a new connection
+            # between aggregator and trainer
 
         # one aggregator is sufficient
         end = channel.one_end(VAL_CH_STATE_SEND)

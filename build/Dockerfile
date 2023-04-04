@@ -36,5 +36,10 @@ COPY --from=golang-build /flame/* /usr/bin/
 # Install flame python library
 COPY --from=python-build /tmp/*.whl /tmp/
 RUN pip3 install /tmp/*.whl && rm -f /tmp/*.whl
+RUN apt update && apt install git wget iproute2 vim make -y
 # this python script configures python packages
 RUN flame-config
+# RUN git clone https://github.com/ShixiongQi/flame-grpc-test.git
+# RUN git clone https://github.com/ShixiongQi/flame.git && cd flame && git checkout knative
+COPY ./lib/python /src
+# RUN cd flame-grpc-test && pip3 install -r requirements.txt && python3 -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. calculator.proto

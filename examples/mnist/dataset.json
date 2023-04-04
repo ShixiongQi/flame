@@ -7,7 +7,7 @@
 
     "dataFormat": "npy",
 
-    "realm": "default/us/west",
+    "realm": "trainer",
 
     "isPublic": true
 }

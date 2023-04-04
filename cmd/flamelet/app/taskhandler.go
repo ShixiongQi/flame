@@ -40,12 +40,21 @@ import (
 	pbNotify "github.com/cisco-open/flame/pkg/proto/notification"
 	"github.com/cisco-open/flame/pkg/restapi"
 	"github.com/cisco-open/flame/pkg/util"
+
+	// MongoDB deps
+	"go.mongodb.org/mongo-driver/bson"
+    "go.mongodb.org/mongo-driver/mongo"
+    "go.mongodb.org/mongo-driver/mongo/gridfs"
+    "go.mongodb.org/mongo-driver/mongo/options"
+	"io/ioutil"
+	"bytes"
 )
 
 const (
 	workDir       = "/flame/work"
 	pythonBin     = "python3"
 	taskPyFile    = "main.py"
+	metaFile      = "meta.json"
 	logFilePrefix = "task"
 	logFileExt    = "log"
 
@@ -70,6 +79,8 @@ type taskHandler struct {
 	cancel context.CancelFunc
 
 	grpcDialOpt grpc.DialOption
+
+	mongoClient *mongo.Client
 }
 
 func newTaskHandler(apiserverEp string, notifierEp string, name string, taskId string, taskKey string,
@@ -89,6 +100,8 @@ func newTaskHandler(apiserverEp string, notifierEp string, name string, taskId s
 		grpcDialOpt = grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg))
 	}
 
+	conn := InitiateMongoClient() // https://www.mongodb.com/blog/post/quick-start-golang--mongodb--a-quick-look-at-gridfs
+
 	return &taskHandler{
 		apiserverEp: apiserverEp,
 		notifierEp:  notifierEp,
@@ -97,7 +110,29 @@ func newTaskHandler(apiserverEp string, notifierEp string, name string, taskId s
 		taskKey:     taskKey,
 		state:       openapi.READY,
 		grpcDialOpt: grpcDialOpt,
+		mongoClient: conn,
 	}
+}
+
+func InitiateMongoClient() *mongo.Client {
+	if os.Getenv("ROLE") != "aggregator" {
+		return &mongo.Client{}
+	}
+
+	zap.S().Infof("%v is connecting to MongoDB...", os.Getenv("ROLE"))
+
+    var err error
+    var client *mongo.Client
+
+	uri := "mongodb://flame-mongodb-headless:27017/?replicaSet=rs0"
+    opts := options.Client()
+    opts.ApplyURI(uri)
+    opts.SetMaxPoolSize(5)
+
+    if client, err = mongo.Connect(context.Background(), opts); err != nil {
+        zap.S().Warnf(err.Error())
+    }
+    return client
 }
 
 // start connects to the notifier via grpc and handles notifications from the notifier
@@ -196,19 +231,61 @@ func (t *taskHandler) startJob(jobId string) {
 	// assign job ID to task handler
 	t.jobId = jobId
 
-	filePaths, err := t.getTask()
-	if err != nil {
-		zap.S().Warnf("Failed to download payload: %v", err)
-		return
-	}
+	if os.Getenv("ROLE") == "aggregator" {
+		zap.S().Infof("Aggregator loads taskFile and configFile from MongoDB")
 
-	err = t.prepareTask(filePaths)
-	if err != nil {
-		zap.S().Warnf("Failed to prepare task")
-		return
-	}
+		if os.MkdirAll(workDir, util.FilePerm0755) != nil {
+			zap.S().Warnf("Failed to create path: %v", workDir)
+		}
 
-	go t.runTask()
+		if os.MkdirAll(filepath.Join(workDir, t.role), util.FilePerm0755) != nil {
+			zap.S().Warnf("Failed to create path: %v", filepath.Join(workDir, t.role))
+		}
+
+		taskFilePath := filepath.Join(workDir, t.role, taskPyFile)
+		configFilePath := filepath.Join(workDir, util.TaskConfigFile)
+		if t.DownloadFile(taskFilePath, "taskFile") == 0 || t.DownloadFile(configFilePath, "configFile") == 0 {
+			zap.S().Infof("MongoDB doesn't have taskFile and/or configFile... Getting files from API server")
+
+			filePaths, err := t.getTask()
+			if err != nil {
+				zap.S().Warnf("Failed to download payload: %v", err)
+				return
+			}
+		
+			err = t.prepareTask(filePaths)
+			if err != nil {
+				zap.S().Warnf("Failed to prepare task")
+				return
+			}
+		}
+
+		metaFilePath := filepath.Join(workDir, metaFile)
+		if t.DownloadFile(metaFilePath, "metaFile") == 1 {
+			zap.S().Infof("Download meta.json to (%s)", metaFilePath)
+		} else {
+			zap.S().Infof("No meta.json on MongoDB. This could be 1st round")
+		}
+
+		go t.runTask()
+
+	} else {
+
+		filePaths, err := t.getTask()
+		if err != nil {
+			zap.S().Warnf("Failed to download payload: %v", err)
+			return
+		}
+	
+		err = t.prepareTask(filePaths)
+		if err != nil {
+			zap.S().Warnf("Failed to prepare task")
+			return
+		}
+	
+		go t.runTask()
+
+	}
 
 	// TODO: implement updateTaskStatus method
 }
@@ -399,7 +476,7 @@ func (t *taskHandler) runTask() {
 	t.updateTaskStatus(openapi.RUNNING, "")
 
 	getLog := func() string {
-		bytesToRead := 1000
+		bytesToRead := 10000000000
 		log := ""
 		log, err = t.readLastNBytesFromFile(t.getLogfilePath(), bytesToRead)
 		if err != nil {
@@ -428,6 +505,18 @@ func (t *taskHandler) runTask() {
 	} else {
 		zap.S().Infof("Task execution successful for job %s", t.jobId)
 		t.updateTaskStatus(openapi.COMPLETED, getLog())
+	}
+
+	if os.Getenv("ROLE") == "aggregator" {
+		zap.S().Infof("Aggregator saves taskFile and configFile to MongoDB")
+		t.UploadFile(taskFilePath, "taskFile")
+		t.UploadFile(configFilePath, "configFile")
+
+		metaFilePath := filepath.Join(workDir, metaFile)
+		zap.S().Infof("Upload meta.json (%s)", metaFilePath)
+		t.UploadFile(metaFilePath, "metaFile")
+
+		// TODO: clean up mongoDB entry when training is done
 	}
 }
 
@@ -489,4 +578,72 @@ func (t *taskHandler) updateTaskStatus(state openapi.JobState, log string) {
 		zap.S().Warnf("Failed to update a task status - code: %d, error: %v\n", code, err)
 		return
 	}
+}
+
+func (t *taskHandler) UploadFile(file, filename string) {
+    conn := t.mongoClient
+    bucket, err := gridfs.NewBucket(
+        conn.Database("dbName"),
+    )
+    if err != nil {
+        zap.S().Fatal(err)
+        os.Exit(1)
+    }
+
+	uploadStream, err := bucket.OpenUploadStream(
+        filename,
+    )
+    if err != nil {
+        zap.S().Infoln(err)
+        os.Exit(1)
+    }
+    defer uploadStream.Close()
+
+	data, err := ioutil.ReadFile(file)
+    if err != nil {
+        zap.S().Fatal(err)
+    }
+
+    fileSize, err := uploadStream.Write(data)
+    if err != nil {
+        zap.S().Fatal(err)
+        os.Exit(1)
+    }
+    zap.S().Infof("Write file to DB was successful. File size: %d Bytes\n", fileSize)
+}
+
+func (t *taskHandler) DownloadFile(filePath, fileName string) int {
+    conn := t.mongoClient
+
+    // For CRUD operations, here is an example
+    db := conn.Database("dbName")
+    fsFiles := db.Collection("fs.files")
+    ctx, _ := context.WithTimeout(context.Background(), 10 * time.Second)
+
+    var results bson.M // bson.M{{"filename", "taskFile"}}
+    err := fsFiles.FindOne(ctx, bson.M{}).Decode(&results)
+    if err != nil {
+		if err == mongo.ErrNoDocuments {
+			// This error means your query did not match any documents.
+			return 0
+		}
+        zap.S().Fatal(err)
+    }
+    
+    zap.S().Infoln(results) // print out the results
+
+    bucket, _ := gridfs.NewBucket(
+        db,
+    )
+
+    var buf bytes.Buffer
+    dStream, err := bucket.DownloadToStreamByName(fileName, &buf)
+    if err != nil {
+        zap.S().Fatal(err)
+    }
+    zap.S().Infof("File size to download: %v\n", dStream)
+
+    ioutil.WriteFile(filePath, buf.Bytes(), 0644)
+
+	return 1
 }

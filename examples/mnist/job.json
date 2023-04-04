@@ -3,8 +3,9 @@
     "schemaVersion": "1",
     "codeVersion": "1",
     "priority": "low",
-    "maxRunTime": 1800,
-    "backend": "mqtt",
+
+    "backend": "p2p",
+    "maxRunTime": 180000000,
 
     "dataSpecPath": "dataSpec.json",
     "modelSpecPath": "modelSpec.json"
