@@ -38,6 +38,7 @@ from flame.mode.role import Role
 from flame.mode.tasklet import Loop, Tasklet
 from flame.optimizers import optimizer_provider
 from flame.registries import registry_provider
+from flame.datasamplers import datasampler_provider
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,10 @@ class Trainer(Role, metaclass=ABCMeta):
         )
         self.regularizer = temp_opt.regularizer
 
+        self.datasampler = datasampler_provider.get(
+            self.config.datasampler.sort, **self.config.datasampler.kwargs
+        ).trainer_data_sampler
+
         self._round = 1
         self._work_done = False
 
@@ -117,7 +122,7 @@ class Trainer(Role, metaclass=ABCMeta):
         if msg is None:
             logger.info("Aggregator must be disconnected! Try to re-establish the connection with Aggregator")
             self.cm.cleanup()
-            self.cm._loop.stop()
+            self.cm._backend.loop().stop()
             del self.cm #NOTE: This is the key step
 
             self.cm = ChannelManager()
@@ -136,6 +141,11 @@ class Trainer(Role, metaclass=ABCMeta):
 
         if MessageType.ROUND in msg:
             self._round = msg[MessageType.ROUND]
+
+        if MessageType.DATASAMPLER_METADATA in msg:
+            self.datasampler.handle_metadata_from_aggregator(
+                msg[MessageType.DATASAMPLER_METADATA]
+            )
 
         self.regularizer.save_state(TrainerState.PRE_TRAIN, glob_model=self.model)
         logger.debug(f"work_done: {self._work_done}, round: {self._round}")
@@ -159,7 +169,7 @@ class Trainer(Role, metaclass=ABCMeta):
 
             # DO ChannelManager cleanup for _send_weights
             self.cm.cleanup()
-            self.cm._loop.stop()
+            self.cm._backend.loop().stop()
             del self.cm #NOTE: This is the key step
 
             # CREATE a new ChannelManager object
@@ -191,6 +201,7 @@ class Trainer(Role, metaclass=ABCMeta):
             MessageType.WEIGHTS: weights_to_device(delta_weights, DeviceType.CPU),
             MessageType.DATASET_SIZE: self.dataset_size,
             MessageType.MODEL_VERSION: self._round,
+            MessageType.DATASAMPLER_METADATA: self.datasampler.get_metadata(),
         }
         channel.send(end, msg)
         logger.debug("sending weights done")
@@ -226,21 +237,21 @@ class Trainer(Role, metaclass=ABCMeta):
         with Composer() as composer:
             self.composer = composer
 
-            task_internal_init = Tasklet(self.internal_init)
+            task_internal_init = Tasklet("", self.internal_init)
 
-            task_load_data = Tasklet(self.load_data)
+            task_load_data = Tasklet("", self.load_data)
 
-            task_init = Tasklet(self.initialize)
+            task_init = Tasklet("", self.initialize)
 
-            task_get = Tasklet(self.get, TAG_FETCH)
+            task_get = Tasklet("", self.get, TAG_FETCH)
 
-            task_train = Tasklet(self.train)
+            task_train = Tasklet("", self.train)
 
-            task_eval = Tasklet(self.evaluate)
+            task_eval = Tasklet("", self.evaluate)
 
-            task_put = Tasklet(self.put, TAG_UPLOAD)
+            task_put = Tasklet("", self.put, TAG_UPLOAD)
 
-            task_save_metrics = Tasklet(self.save_metrics)
+            task_save_metrics = Tasklet("", self.save_metrics)
 
             # create a loop object with loop exit condition function
             loop = Loop(loop_check_fn=lambda: self._work_done)

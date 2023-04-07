@@ -1,5 +1,4 @@
-#!/usr/bin/env bash
-# Copyright 2022 Cisco Systems, Inc. and its affiliates
+# Copyright 2023 Cisco Systems, Inc. and its affiliates
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +13,3 @@
 # limitations under the License.
 #
 # SPDX-License-Identifier: Apache-2.0
-
-# To run the following command, grpcio-tools is needed.
-# if it's not installed, run "pip install grpcio-tools"
-python -m grpc_tools.protoc -I=./ --python_out=./ --grpc_python_out=./ ./backend_msg.proto

@@ -1,4 +1,4 @@
-# Copyright 2022 Cisco Systems, Inc. and its affiliates
+# Copyright 2023 Cisco Systems, Inc. and its affiliates
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,21 +13,3 @@
 # limitations under the License.
 #
 # SPDX-License-Identifier: Apache-2.0
-
-"""Factory for discovery clients."""
-
-from .discovery.local_client import LocalDiscoveryClient
-from .object_factory import ObjectFactory
-
-
-class DiscoveryClientProvider(ObjectFactory):
-    """Discovery client provider."""
-
-    #
-    def get(self, client_name, **kargs):
-        """Return a discovery client object given a name."""
-        return self.create(client_name, **kargs)
-
-
-discovery_client_provider = DiscoveryClientProvider()
-discovery_client_provider.register('local', LocalDiscoveryClient)

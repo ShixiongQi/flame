@@ -19,6 +19,7 @@ import os, json
 import logging
 import time
 from copy import deepcopy
+from datetime import datetime
 
 from diskcache import Cache
 from flame.channel_manager import ChannelManager
@@ -41,11 +42,14 @@ from flame.optimizer.train_result import TrainResult
 from flame.optimizers import optimizer_provider
 from flame.plugin import PluginManager, PluginType
 from flame.registries import registry_provider
+from flame.datasamplers import datasampler_provider
 
 logger = logging.getLogger(__name__)
 
 TAG_DISTRIBUTE = "distribute"
 TAG_AGGREGATE = "aggregate"
+PROP_ROUND_START_TIME = "round_start_time"
+PROP_ROUND_END_TIME = "round_end_time"
 
 
 class TopAggregator(Role, metaclass=ABCMeta):
@@ -95,6 +99,10 @@ class TopAggregator(Role, metaclass=ABCMeta):
             self.config.optimizer.sort, **self.config.optimizer.kwargs
         )
 
+        self.datasampler = datasampler_provider.get(
+            self.config.datasampler.sort, **self.config.datasampler.kwargs
+        ).aggregator_data_sampler
+
         self._round = 1
         self._rounds = 1
         self._rounds = self.config.hyperparameters.rounds
@@ -128,21 +136,31 @@ class TopAggregator(Role, metaclass=ABCMeta):
             return
 
         total = 0
+
         # receive local model parameters from trainers
         #TODO: Take a diff and get the the endpoints (trainers) that haven't uploaded their model updates. This is required for Sync-FL and Semi-sync FL
         # for end, msg in channel.recv_fifo(self.remaining_ends()):
         for msg, metadata in channel.recv_fifo(channel.ends()):
-            end, _ = metadata
+            end, timestamp = metadata
             if not msg:
                 logger.debug(f"No data from {end}; skipping it")
                 continue
 
             logger.debug(f"received data from {end}")
+            channel.set_end_property(end, PROP_ROUND_END_TIME, (round, timestamp))
+
             if MessageType.WEIGHTS in msg:
                 weights = weights_to_model_device(msg[MessageType.WEIGHTS], self.model)
 
             if MessageType.DATASET_SIZE in msg:
                 count = msg[MessageType.DATASET_SIZE]
+
+            if MessageType.DATASAMPLER_METADATA in msg:
+                self.datasampler.handle_metadata_from_trainer(
+                    msg[MessageType.DATASAMPLER_METADATA],
+                    end,
+                    channel,
+                )
 
             logger.debug(f"{end}'s parameters trained with {count} samples")
 
@@ -203,8 +221,11 @@ class TopAggregator(Role, metaclass=ABCMeta):
         # before distributing weights, update it from global model
         self._update_weights()
 
+        selected_ends = channel.ends()
+        datasampler_metadata = self.datasampler.get_metadata(self._round, selected_ends)
+
         # send out global model parameters to trainers
-        for end in channel.ends():
+        for end in selected_ends:
             logger.debug(f"sending weights to {end}")
             channel.send(
                 end,
@@ -213,10 +234,15 @@ class TopAggregator(Role, metaclass=ABCMeta):
                         self.weights, DeviceType.CPU
                     ),
                     MessageType.ROUND: self._round,
+                    MessageType.DATASAMPLER_METADATA: datasampler_metadata,
                 },
             )
             # logger.info(f"Add registered endpoint: {end}")
             # self.registered_ends.append(end) # = channel.ends()
+            # register round start time on each end for round duration measurement.
+            channel.set_end_property(
+                end, PROP_ROUND_START_TIME, (round, datetime.now())
+            )
 
     def inform_end_of_training(self) -> None:
         """Inform all the trainers that the training is finished."""
@@ -358,31 +384,33 @@ class TopAggregator(Role, metaclass=ABCMeta):
         with Composer() as composer:
             self.composer = composer
 
-            task_internal_init = Tasklet(self.internal_init)
+            task_internal_init = Tasklet("internal_init", self.internal_init)
 
-            task_init = Tasklet(self.initialize)
+            task_init = Tasklet("initialize", self.initialize)
 
-            task_load_data = Tasklet(self.load_data)
+            task_load_data = Tasklet("load_data", self.load_data)
 
-            task_put = Tasklet(self.put, TAG_DISTRIBUTE)
+            task_put = Tasklet("distribute", self.put, TAG_DISTRIBUTE)
 
-            task_get = Tasklet(self.get, TAG_AGGREGATE)
+            task_get = Tasklet("aggregate", self.get, TAG_AGGREGATE)
 
-            task_train = Tasklet(self.train)
+            task_train = Tasklet("train", self.train)
 
-            task_eval = Tasklet(self.evaluate)
+            task_eval = Tasklet("evaluate", self.evaluate)
 
-            task_analysis = Tasklet(self.run_analysis)
+            task_analysis = Tasklet("analysis", self.run_analysis)
 
-            task_save_metrics = Tasklet(self.save_metrics)
+            task_save_metrics = Tasklet("save_metrics", self.save_metrics)
 
-            task_increment_round = Tasklet(self.increment_round)
+            task_increment_round = Tasklet("inc_round", self.increment_round)
 
-            task_end_of_training = Tasklet(self.inform_end_of_training)
+            task_end_of_training = Tasklet(
+                "inform_end_of_training", self.inform_end_of_training
+            )
 
-            task_save_params = Tasklet(self.save_params)
+            task_save_params = Tasklet("save_params", self.save_params)
 
-            task_save_model = Tasklet(self.save_model)
+            task_save_model = Tasklet("save_model", self.save_model)
 
         # create a loop object with loop exit condition function
         loop = Loop(loop_check_fn=lambda: self._work_done)
