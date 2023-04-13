@@ -3,7 +3,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ .Release.Namespace }}-trainer-<% taskId %>
+  name: {{ .Release.Namespace }}-coordinator-<% taskId %>
   namespace: {{ .Release.Namespace }}
 spec:
   template:
@@ -25,8 +25,8 @@ spec:
           # command: ["/bin/bash", "-c", "--"]
           # args: ["while true; do sleep 30; done;"]
           image: <% imageLoc %>
-          imagePullPolicy: Always
-          name: {{ .Release.Namespace }}-trainer-<% taskId %>
+          imagePullPolicy: IfNotPresent
+          name: {{ .Release.Namespace }}-coordinator-<% taskId %>
 
           ports:
             - containerPort: {{ .Values.servicePort.agent }}
@@ -52,14 +52,12 @@ spec:
               value: {{ .Values.accessKeyId }}
             - name: AWS_SECRET_ACCESS_KEY
               value: {{ .Values.secretAccessKey }}
-            # - name: AGGREGATOR_URL
-            #  value: {{ .Values.aggregatorUrl }}
             - name: KN_INGRESS_IP
               value: {{ .Values.knIngressIp }}
             - name: KN_INGRESS_PORT
               value: "{{ .Values.knIngressPort }}"
             - name: ROLE
-              value: "trainer"
+              value: "coordinator"
             - name: GIT_PYTHON_REFRESH
               value: "quiet"
             - name: TF_CPP_MIN_LOG_LEVEL

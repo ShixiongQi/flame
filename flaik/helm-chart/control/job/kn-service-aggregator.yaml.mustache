@@ -3,7 +3,7 @@
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
-  name: {{ .Release.Namespace }}-aggregator
+  name: {{ .Release.Namespace }}-aggregator-<% taskId %>
   namespace: {{ .Release.Namespace }}
 spec:
   template:
@@ -29,10 +29,9 @@ spec:
             {{ if .Values.insecure }}
             - "--insecure"
             {{ end }}
-          # command: ["/usr/bin/flamelet"]
-        # - command: ["python3", "/flame-grpc-test/server.py"]
-          command: ["/bin/bash", "-c", "--"]
-          args: ["while true; do sleep 30; done;"]
+          command: ["/usr/bin/flamelet"]
+          # command: ["/bin/bash", "-c", "--"]
+          # args: ["while true; do sleep 30; done;"]
           image: <% imageLoc %>
           imagePullPolicy: Always
           name: {{ .Release.Namespace }}-aggregator
@@ -41,7 +40,6 @@ spec:
           - name: h2c
             containerPort: {{ .Values.servicePort.agent }}
             containerPort: 8080
-          # - containerPort: {{ .Values.servicePort.agent }}
 
           resources: # TODO: Need to determine the right resource allocation for a single aggregator pod
             limits:
@@ -64,8 +62,8 @@ spec:
               value: {{ .Values.accessKeyId }}
             - name: AWS_SECRET_ACCESS_KEY
               value: {{ .Values.secretAccessKey }}
-            - name: AGGREGATOR_URL
-              value: {{ .Values.aggregatorUrl }}
+            # - name: AGGREGATOR_URL
+            #  value: {{ .Values.aggregatorUrl }}
             - name: KN_INGRESS_IP
               value: {{ .Values.knIngressIp }}
             - name: KN_INGRESS_PORT

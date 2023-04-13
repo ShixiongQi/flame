@@ -147,8 +147,23 @@ deployerTrainer:
     folder: /flame/template
     # to use a different template file, put the file in the "job" folder
     # use its file name as the value of key "file".
-    # also, update the name in the templates/deployer-job-configmap.yaml
+    # also, update the name in the templates/deployer-trainer-job-configmap.yaml
     file: job-trainer.yaml.mustache
+
+# This deployer is used to deploy coordinator pod
+deployerCoordinator:
+  adminId: "admin-coordinator"
+  region: "default/us"
+  computeId: "coordinator"
+  apiKey: "apiKey-coordinator"
+  platform: "k8s" # "k8s" is the only available option for now
+  namespace: "flame"
+  jobTemplate:
+    folder: /flame/template
+    # to use a different template file, put the file in the "job" folder
+    # use its file name as the value of key "file".
+    # also, update the name in the templates/deployer-coordinator-job-configmap.yaml
+    file: job-coordinator.yaml.mustache
 
 servicePort:
   apiserver: "10100"

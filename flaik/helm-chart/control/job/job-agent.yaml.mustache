@@ -50,6 +50,10 @@ spec:
               value: {{ .Values.accessKeyId }}
             - name: AWS_SECRET_ACCESS_KEY
               value: {{ .Values.secretAccessKey }}
+            - name: GIT_PYTHON_REFRESH
+              value: "quiet"
+            - name: TF_CPP_MIN_LOG_LEVEL
+              value: "3"
       restartPolicy: Never
 
       affinity:
