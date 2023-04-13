@@ -260,7 +260,12 @@ func (b *JobBuilder) buildTasks(templates map[string]*taskTemplate) []objects.Ta
 				for _, associations := range b.groupAssociations[roleName] {
 					task := tmpl.Task
 
-					task.ComputeId = util.DefaultRealm
+					// Note: the deployment of coordinator is handled by "coordinator" deployer
+					if roleName == "coordinator" {
+						task.ComputeId = "coordinator"
+					} else {
+						task.ComputeId = util.DefaultRealm
+					}
 					task.Type = openapi.SYSTEM
 					task.Key = util.RandString(taskKeyLen)
 					task.JobConfig.GroupAssociation = associations

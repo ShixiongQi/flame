@@ -583,7 +583,7 @@ func (t *taskHandler) updateTaskStatus(state openapi.JobState, log string) {
 func (t *taskHandler) UploadFile(file, filename string) {
     conn := t.mongoClient
     bucket, err := gridfs.NewBucket(
-        conn.Database("dbName"),
+        conn.Database(t.taskId),
     )
     if err != nil {
         zap.S().Fatal(err)
@@ -616,7 +616,7 @@ func (t *taskHandler) DownloadFile(filePath, fileName string) int {
     conn := t.mongoClient
 
     // For CRUD operations, here is an example
-    db := conn.Database("dbName")
+    db := conn.Database(t.taskId)
     fsFiles := db.Collection("fs.files")
     ctx, _ := context.WithTimeout(context.Background(), 10 * time.Second)
 
