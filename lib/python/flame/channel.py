@@ -41,6 +41,8 @@ class Channel(object):
 
     def __init__(
         self,
+        num_ends,
+        mid_agg_urls,
         backend,
         selector,
         job_id: str,
@@ -59,16 +61,20 @@ class Channel(object):
         self._groupby = groupby
         self.properties = dict()
         self.await_join_event = None
+        self.await_ends_join_event = None #NOTE: Use to support await_ends_join()
+        self.mid_agg_urls = mid_agg_urls
 
         # access _ends with caution.
         # in many cases, _ends must be accessed within a backend's loop
         self._ends: dict[str, End] = dict()
+        self.num_ends = num_ends
 
         # dict showing active, awaiting recv fifo tasks on each ends
         self._active_recv_fifo_tasks: set(str) = set()
 
         async def _setup():
             self.await_join_event = asyncio.Event()
+            self.await_ends_join_event = asyncio.Event()
 
             self._bcast_queue = asyncio.Queue()
             self._rx_queue = asyncio.Queue()
@@ -412,7 +418,25 @@ class Channel(object):
 
     def join(self):
         """Join the channel."""
-        self._backend.join(self)
+        self._backend.join(self, self.mid_agg_urls)
+
+    def await_ends_join(self, timeout=None) -> bool:
+        """Wait for specified number of peers joins a channel."""
+
+        async def _inner() -> bool:
+            """Return True if timeout occurs; otherwise False."""
+            logger.debug(f"waiting for {self.num_ends} peers to join")
+            try:
+                await asyncio.wait_for(self.await_ends_join_event.wait(), timeout)
+            except asyncio.TimeoutError:
+                logger.debug("timeout occurred")
+                return True
+            logger.debug(f"all peers {self.num_ends} joined")
+            return False
+
+        timeouted, _ = run_async(_inner(), self._backend.loop())
+        logger.debug(f"timeouted = {timeouted}")
+        return timeouted
 
     def await_join(self, timeout=None) -> bool:
         """Wait for at least one peer joins a channel.
@@ -481,6 +505,10 @@ class Channel(object):
         if not self.await_join_event.is_set():
             # set the event true
             self.await_join_event.set()
+
+        if len(self._ends) == self.num_ends or not self.await_ends_join_event.is_set():
+            # set the event true
+            self.await_ends_join_event.set()    
 
     async def remove(self, end_id):
         """Remove an end from the channel."""

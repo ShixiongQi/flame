@@ -35,13 +35,13 @@ from .chunk_manager import ChunkManager
 from .chunk_store import ChunkStore
 
 logger = logging.getLogger(__name__)
-# logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.DEBUG)
 
 ENDPOINT_TOKEN_LEN = 2
 HEART_BEAT_DURATION = 30  # for metaserver
 
-PEER_HEART_BEAT_PERIOD = 20  # 20 seconds
-PEER_HEART_BEAT_WAIT_TIME = 1.5 * PEER_HEART_BEAT_PERIOD
+PEER_HEART_BEAT_PERIOD = 200  # NOTE: Change PEER_HEART_BEAT_PERIOD to a large value to avoid scaling issue
+PEER_HEART_BEAT_WAIT_TIME = 15 * PEER_HEART_BEAT_PERIOD
 HEART_BEAT_UPDATE_SKIP_TIME = PEER_HEART_BEAT_PERIOD / 4
 
 GRPC_MAX_MESSAGE_LENGTH = 1073741824  # 1GB
@@ -97,7 +97,7 @@ class PointToPointBackend(AbstractBackend):
     PointToPoint backend is EXPERIMENTAL.
     """
 
-    def __init__(self):
+    def __init__(self, role: str):
         """Initialize an instance."""
         self._instance = None
         self._initialized = False
@@ -113,6 +113,7 @@ class PointToPointBackend(AbstractBackend):
             return
 
         self._backend = None
+        self._role = role
 
         self._endpoints = {}
         self._channels = {}
@@ -122,10 +123,10 @@ class PointToPointBackend(AbstractBackend):
         self.dummy_client_task = None
 
         # variables for serverless setup
-        self.aggregator_url = os.environ['AGGREGATOR_URL']
-        self.ingress_ip = os.environ['KN_INGRESS_IP']
-        self.ingress_port = os.environ['KN_INGRESS_PORT']
-        self.sls_aggregator_ep = f'{self.ingress_ip}:{self.ingress_port}'
+        self.aggregator_url = None
+        self.ingress_ip = os.environ["KN_INGRESS_IP"]
+        self.ingress_port = os.environ["KN_INGRESS_PORT"]
+        self.sls_aggregator_ep = f"{self.ingress_ip}:{self.ingress_port}"
 
         with background_thread_loop() as loop:
             self._loop = loop
@@ -143,38 +144,32 @@ class PointToPointBackend(AbstractBackend):
         _, success = run_async(coro, self._loop, DEFAULT_RUN_ASYNC_WAIT_TIME)
 
         if not success:
-            raise SystemError('initialization failure')
+            raise SystemError("initialization failure")
 
         self._initialized = True
 
     async def _setup_server(self):
-        server = grpc.aio.server(options=[('grpc.max_send_message_length',
+        server = grpc.aio.server(options=[("grpc.max_send_message_length",
                                            GRPC_MAX_MESSAGE_LENGTH),
-                                          ('grpc.max_receive_message_length',
+                                          ("grpc.max_receive_message_length",
                                            GRPC_MAX_MESSAGE_LENGTH)])
         msg_pb2_grpc.add_BackendRouteServicer_to_server(
             BackendServicer(self), server)
 
-        role = os.environ['ROLE']
-        logger.info(f'Role of current compute: {role}')
-        if os.environ['ROLE'] == 'aggregator':
+        logger.info(f"Role of current compute: {self._role}")
+        if "aggregator" in self._role:
             ip_addr = socket.gethostbyname(socket.gethostname())
             port = 8080
-            server.add_insecure_port(f'[::]:{port}')
-            logger.info(f'Starting server. Listening on port {port}.')
-
-            self._backend = f'{ip_addr}:{port}'
-            logger.info(f'Aggregator serving on {self._backend}')
-            await server.start()
-            await server.wait_for_termination()
+            server.add_insecure_port(f"[::]:{port}")
+            self._backend = f"{ip_addr}:{port}"
         else:
             ip_addr = socket.gethostbyname(socket.gethostname())
-            port = server.add_insecure_port(f'{ip_addr}:0')
+            port = server.add_insecure_port(f"{ip_addr}:0")
+            self._backend = f"{ip_addr}:{port}"
 
-            self._backend = f'{ip_addr}:{port}'
-            logger.info(f'serving on {self._backend}')
-            await server.start()
-            await server.wait_for_termination()
+        logger.info(f"{self._role} serving on {self._backend}")
+        await server.start()
+        await server.wait_for_termination()
 
     def configure(self, broker: str, job_id: str, task_id: str):
         """Configure the backend."""
@@ -194,29 +189,17 @@ class PointToPointBackend(AbstractBackend):
         """Return backend id."""
         return self._id
 
-    def join(self, channel) -> None:
+    def join(self, channel, mid_agg_urls: dict) -> None:
         """Join a channel."""
 
         async def _join_inner():
-            coro = self._register_channel(channel)
+            coro = self._register_channel(channel, mid_agg_urls)
             _ = asyncio.create_task(coro)
 
         coro = _join_inner()
         _, success = run_async(coro, self._loop, DEFAULT_RUN_ASYNC_WAIT_TIME)
         if not success:
-            raise SystemError('join failure')
-
-    # def rejoin(self, channel) -> None:
-    #     """Rejoin a channel."""
-
-    #     async def _join_inner():
-    #         coro = self._register_channel_again(channel)
-    #         _ = asyncio.create_task(coro)
-
-    #     coro = _join_inner()
-    #     _, success = run_async(coro, self._loop, DEFAULT_RUN_ASYNC_WAIT_TIME)
-    #     if not success:
-    #         raise SystemError('rejoin failure')
+            raise SystemError("join failure")
 
     def create_tx_task(self,
                        channel_name: str,
@@ -239,36 +222,36 @@ class PointToPointBackend(AbstractBackend):
                             end_id: str) -> bool:
         """Terminate the dummy client coroutine to stop sending dummy requests."""
         if (channel_name not in self._channels):
-            logger.debug(f'[kill_dummy_client()] Unknown {channel_name}')
+            logger.debug(f"[kill_dummy_client()] Unknown {channel_name}")
             return False
         
         was_cancelled = self.dummy_client_task.cancel()
-        logger.debug(f'Dummy client was killed: {was_cancelled}')
+        logger.debug(f"Dummy client was killed: {was_cancelled}")
 
     def create_dummy_client(self,
                             channel_name: str,
                             end_id: str) -> bool:
         """Create a dummy client for sending dummy requests to keep the aggregator warm."""
-        logger.debug('Dummy client is being created in p2p backend')
+        logger.debug("Dummy client is being created in p2p backend")
 
         if (channel_name not in self._channels):
-            logger.debug(f'[create_dummy_client()] Unknown {channel_name}')
+            logger.debug(f"[create_dummy_client()] Unknown {channel_name}")
             return False
         
         channel = self._channels[channel_name]
 
         grpc_ch = grpc.aio.insecure_channel(
             self.sls_aggregator_ep,
-            options=[('grpc.default_authority', self.aggregator_url),
-                     ('grpc.max_send_message_length', GRPC_MAX_MESSAGE_LENGTH),
-                     ('grpc.max_receive_message_length',
+            options=[("grpc.default_authority", self.aggregator_url),
+                     ("grpc.max_send_message_length", GRPC_MAX_MESSAGE_LENGTH),
+                     ("grpc.max_receive_message_length",
                       GRPC_MAX_MESSAGE_LENGTH)])
         stub = msg_pb2_grpc.BackendRouteStub(grpc_ch)
 
         coro = self._dummy_client(channel, stub, grpc_ch)
 
         self.dummy_client_task = asyncio.create_task(coro)
-        logger.debug('dummy_client_task created')
+        logger.debug("dummy_client_task created")
 
     async def _dummy_client(self, channel, stub, grpc_ch):
         """HTTP client used to send dummy requests in a loop."""
@@ -287,7 +270,7 @@ class PointToPointBackend(AbstractBackend):
         """Attach a channel to backend."""
         self._channels[channel.name()] = channel
 
-    async def _register_channel(self, channel) -> None:
+    async def _register_channel(self, channel, mid_agg_urls: dict) -> None:
         logger.info("calling _register_channel")
         with grpc.insecure_channel(self._broker) as grpc_channel:
             stub = meta_pb2_grpc.MetaRouteStub(grpc_channel)
@@ -305,92 +288,119 @@ class PointToPointBackend(AbstractBackend):
                 meta_pb2_success = meta_pb2.MetaResponse.Status.SUCCESS
                 if meta_resp.status != meta_pb2_success:
                     logger.debug("registration failed")
-                    raise SystemError('registration failure')
-
-                if channel.my_role() == 'trainer':
-                    logger.info(f"connecting to endpoint: {self.sls_aggregator_ep}")
-                    await self._trainer_connect_and_notify_aggregator(self.sls_aggregator_ep, channel, self.aggregator_url)
-                elif channel.my_role() == 'aggregator':
-                    logger.info("Aggregator-side gRPC client has been disabled")
-                    # for endpoint in meta_resp.endpoints:
-                        # logger.info(f"connecting to endpoint: {endpoint}")
-                        # await self._aggregator_connect_and_notify_trainer(endpoint, channel)
-                else:
+                    raise SystemError("registration failure")
+                
+                #NOTE: Register control plane channels (coordinator <-> others)
+                if "coordinator" in channel.my_role() or "coordinator" in channel.other_role():
                     for endpoint in meta_resp.endpoints:
-                        logger.info(f"connecting to endpoint: {endpoint}")
+                        logger.info(f"|| Register control plane channel {channel.name()} || {channel.my_role()} connecting to {channel.other_role()}: {endpoint}")
                         await self._connect_and_notify(endpoint, channel)
 
+                #NOTE: Register data plane channels (trainer -> mid_aggregator)
+                elif "trainer" in channel.my_role() and "middle-aggregator" in channel.other_role():
+                    for endpoint in mid_agg_urls.values():
+                        if "flame-aggregator" in endpoint:
+                            #TODO: Use the URL from coordinator
+                            logger.info(f"{channel.my_role()} connecting to aggregator: {self.sls_aggregator_ep} \"URL: {endpoint}\"")
+                            await self._connect_and_notify_aggregator(self.sls_aggregator_ep, channel, endpoint)
+                        else:
+                            logger.error(f"endpoint info is not aggregator URL!")
+                
+                #NOTE: Register data plane channels (top_aggregator -> mid_aggregator)
+                elif "top-aggregator" in channel.my_role() and "middle-aggregator" in channel.other_role():
+                    for endpoint in mid_agg_urls.values():
+                        if "flame-aggregator" in endpoint:
+                            logger.info(f"{channel.my_role()} connecting to aggregator: {self.sls_aggregator_ep} \"URL: {endpoint}\"")
+                            await self._connect_and_notify_aggregator(self.sls_aggregator_ep, channel, endpoint)
+                        else:
+                            logger.error(f"endpoint info is not aggregator URL!")
+                else:
+                    logger.error(f"middle-aggregator -> others connection establishment is disabled!")
+
+                # elif "middle-aggregator" in channel.my_role() or "trainer" in channel.other_role():
+                #     logger.error(f"middle-aggregator -> others connection establishment is disabled!")
+                #     # logger.info(f"{channel.my_role()} informs endpoint: {endpoint}")
+                #     # await self._aggregator_inform_trainer_or_coordinator(endpoint, channel) #NOTE: this is the key
+
+                # else:
+                #     for endpoint in meta_resp.endpoints:
+                #         logger.info(f"connecting to endpoint: {endpoint}")
+                #         await self._connect_and_notify(endpoint, channel)
+
             while True:
-                if channel.my_role() != 'aggregator':
-                    meta_resp = stub.HeartBeat(meta_info)
-                    logger.debug(f"meta_resp from heart beat: {meta_resp}")
+                meta_resp = stub.HeartBeat(meta_info)
+                logger.debug(f"meta_resp from heart beat: {meta_resp}")
                 await asyncio.sleep(HEART_BEAT_DURATION)
 
-    # async def _register_channel_again(self, channel) -> None:
-    #     logger.info("calling _register_channel_again")
+    async def _passive_register_channel(self, channel) -> None:
+        logger.info(f"calling _passive_register_channel")
+        logger.info(f"{channel.my_role()} connecting to aggregator: {self.sls_aggregator_ep} \"URL: {self.aggregator_url}\"")
+        await self._connect_and_notify_aggregator(self.sls_aggregator_ep, channel, self.aggregator_url)
 
-    #     if channel.my_role() == 'trainer':
-    #         logger.info(f"connecting to endpoint: {self.sls_aggregator_ep}")
-    #         await self._trainer_connect_and_notify_aggregator(self.sls_aggregator_ep, channel, self.aggregator_url)
-    #     elif channel.my_role() == 'aggregator':
-    #         logger.info("Aggregator-side gRPC client has been disabled")
-    #     else:
-    #         raise SystemError('rejoin is only supported for trainer or aggregator')
-
-    #     while True:
-    #         await asyncio.sleep(HEART_BEAT_DURATION)
+        while True:
+            await asyncio.sleep(HEART_BEAT_DURATION)
 
     async def _connect_and_notify(self, endpoint: str, channel) -> None:
         grpc_ch = grpc.aio.insecure_channel(
             endpoint,
-            options=[('grpc.max_send_message_length', GRPC_MAX_MESSAGE_LENGTH),
-                     ('grpc.max_receive_message_length',
+            options=[("grpc.max_send_message_length", GRPC_MAX_MESSAGE_LENGTH),
+                     ("grpc.max_receive_message_length",
                       GRPC_MAX_MESSAGE_LENGTH)])
         stub = msg_pb2_grpc.BackendRouteStub(grpc_ch)
 
-        await self.notify(channel, msg_pb2.NotifyType.JOIN, stub, grpc_ch)
+        await self.notify(channel, msg_pb2.NotifyType.JOIN, stub, grpc_ch, "")
 
-    async def _aggregator_connect_and_notify_trainer(self, endpoint: str, channel) -> None:
+    async def _connect_and_notify_aggregator(self, endpoint: str, channel, aggregator_url: str) -> None:
         grpc_ch = grpc.aio.insecure_channel(
             endpoint,
-            options=[('grpc.max_send_message_length', GRPC_MAX_MESSAGE_LENGTH),
-                     ('grpc.max_receive_message_length',
+            options=[("grpc.default_authority", aggregator_url),
+                     ("grpc.max_send_message_length", GRPC_MAX_MESSAGE_LENGTH),
+                     ("grpc.max_receive_message_length",
                       GRPC_MAX_MESSAGE_LENGTH)])
         stub = msg_pb2_grpc.BackendRouteStub(grpc_ch)
 
-        await self.notify(channel, msg_pb2.NotifyType.JOIN, stub, grpc_ch)
+        await self.notify(channel, msg_pb2.NotifyType.JOIN, stub, grpc_ch, "_connect_and_notify_aggregator")
 
-    async def _trainer_connect_and_notify_aggregator(self, endpoint: str, channel, aggregator_url: str) -> None:
+    async def _aggregator_inform_trainer_or_coordinator(self, endpoint: str, channel) -> None:
         grpc_ch = grpc.aio.insecure_channel(
             endpoint,
-            options=[('grpc.default_authority', aggregator_url),
-                     ('grpc.max_send_message_length', GRPC_MAX_MESSAGE_LENGTH),
-                     ('grpc.max_receive_message_length',
+            options=[("grpc.max_send_message_length", GRPC_MAX_MESSAGE_LENGTH),
+                     ("grpc.max_receive_message_length",
                       GRPC_MAX_MESSAGE_LENGTH)])
         stub = msg_pb2_grpc.BackendRouteStub(grpc_ch)
 
-        await self.notify(channel, msg_pb2.NotifyType.JOIN, stub, grpc_ch)
+        await self.notify(channel, msg_pb2.NotifyType.UNKNOWN_NOTIFY_TYPE, stub, grpc_ch, "")
 
-    async def notify(self, channel, notify_type, stub, grpc_ch) -> bool:
+    async def notify(self, channel, notify_type, stub, grpc_ch, is_conn_to_aggregator: "") -> bool:
         """Send a notify message to an end by using stub."""
         if channel.name() not in self._channels:
-            logger.debug(f'channel {channel.name()} not found')
+            logger.debug(f"channel {channel.name()} not found")
             return False
 
         msg = msg_pb2.Notify(end_id=self._id,
                              channel_name=channel.name(),
                              type=notify_type)
 
-        if channel.my_role() == 'trainer':
+        if notify_type == msg_pb2.NotifyType.UNKNOWN_NOTIFY_TYPE:
+            try:
+                resp = await stub.notify_end(msg)
+                logger.info(f"resp of _aggregator_inform_trainer_or_coordinator = {resp}")
+                logger.info(f"aggregator terminates gRPC client")
+                return True
+            except grpc.aio.AioRpcError as err:
+                logger.debug(f"can't proceed as grpc channel [{channel.name()}] is unavailable || Error code name: {err.code().name} || Error code value: {err.code().value[0]}")
+                return False
+
+        if is_conn_to_aggregator == "_connect_and_notify_aggregator":
             while 1:
                 try:
                     resp = await stub.notify_end(msg)
                     break
                 except grpc.aio.AioRpcError as err:
-                    logger.debug("can't proceed as grpc channel is unavailable || Error code name: {} || Error code value: {}".format(err.code().name, err.code().value[0]))
+                    logger.debug(f"can't proceed as grpc channel [{channel.name()}] is unavailable || Error code name: {err.code().name} || Error code value: {err.code().value[0]}")
                     if err.code().value[0] == 12 or err.code().value[0] == 14:
                         time.sleep(0.1)
-                        logger.debug('Trainer retries connecting to Aggregator')
+                        logger.debug("Trainer retries connecting to Aggregator")
                         continue
                     else:
                         return False
@@ -398,7 +408,7 @@ class PointToPointBackend(AbstractBackend):
             try:
                 resp = await stub.notify_end(msg)
             except grpc.aio.AioRpcError as err:
-                logger.debug("can't proceed as grpc channel is unavailable || Error code name: {} || Error code value: {}".format(err.code().name, err.code().value[0]))
+                logger.debug(f"can't proceed as grpc channel [{channel.name()}] is unavailable || Error code name: {err.code().name} || Error code value: {err.code().value[0]}")
                 return False
 
 
@@ -415,11 +425,11 @@ class PointToPointBackend(AbstractBackend):
         if msg.end_id == self._id:
             # This case happens when message is broadcast to a self-loop
             # e.g., distributed topology
-            logger.debug('message sent to self; do nothing')
+            logger.debug("message sent to self; do nothing")
             return msg_pb2.Notify(type=msg_pb2.NotifyType.ACK)
 
         if msg.channel_name not in self._channels:
-            logger.debug('channel not found')
+            logger.debug("channel not found")
             return msg_pb2.Notify(type=msg_pb2.NotifyType.ACK)
 
         channel = self._channels[msg.channel_name]
@@ -442,14 +452,14 @@ class PointToPointBackend(AbstractBackend):
                 # to send messages. here we can't call "channel.add(msg.end_id)."
                 # therefore, we save info for adding end to a channel here.
                 # we do actuall addition in _set_writer() method.
-                logger.info('server needs to wait for writer context')
+                logger.info("server needs to wait for writer context")
                 if msg.end_id not in self.delayed_channel_add:
                     self.delayed_channel_add[msg.end_id] = []
                 self.delayed_channel_add[msg.end_id].append(channel)
 
             # this is the first time to see this end,
             # so let's notify my presence to the end
-            logger.debug('acknowledge notification')
+            logger.debug("acknowledge notification")
             return msg_pb2.Notify(end_id=self._id,
                                   channel_name=msg.channel_name,
                                   type=msg_pb2.NotifyType.JOIN)
@@ -458,6 +468,12 @@ class PointToPointBackend(AbstractBackend):
             # it's sufficient to remove end from channel
             # no extra action (e.g., unsubscribe) needed
             await channel.remove(msg.end_id)
+        
+        elif msg.type == msg_pb2.NotifyType.UNKNOWN_NOTIFY_TYPE:
+            logger.info(f"{self._role} receiving online information from flame-aggregator-{msg.end_id}.flame.example.com")
+            self.aggregator_url = f"flame-aggregator-{msg.end_id}.flame.example.com"
+            #NOTE: create an async task in trainer/coordinator to connect with aggregator
+            _ = asyncio.create_task(self._passive_register_channel(channel))
 
         return msg_pb2.Notify(type=msg_pb2.NotifyType.ACK)
 
@@ -465,7 +481,7 @@ class PointToPointBackend(AbstractBackend):
         if msg.end_id == self._id:
             # This case happens when message is broadcast to a self-loop
             # e.g., distributed topology
-            logger.debug('message sent to self; do nothing')
+            logger.debug("message sent to self; do nothing")
             return
 
         channel = self._channels[msg.channel_name]
@@ -575,11 +591,11 @@ class PointToPointBackend(AbstractBackend):
 
         # TODO: keep regenerating messages can be expensive; revisit this later
         if clt_writer is not None:
-            logger.info("clt_writer sends chunks")
+            logger.info(f"clt_writer ({self._role}) sends chunks to {other} via {ch_name} || data length {len(data)} Bytes")
             await clt_writer.send_data(
                 self._generate_data_messages(ch_name, data))
         elif svr_writer is not None:
-            logger.info("svr_writer sends chunks")
+            logger.info(f"svr_writer ({self._role}) sends chunks to {other} via {ch_name} || data length {len(data)} Bytes")
             for msg in self._generate_data_messages(ch_name, data):
                 await svr_writer.write(msg)
         else:
@@ -665,6 +681,31 @@ class PointToPointBackend(AbstractBackend):
         await asyncio.gather(*self.tx_tasks)
         logger.debug("all done")
 
+    # async def _register_channel_again(self, channel) -> None:
+    #     logger.info("calling _register_channel_again")
+
+    #     if channel.my_role() == "trainer":
+    #         logger.info(f"connecting to endpoint: {self.sls_aggregator_ep}")
+    #         await self._connect_and_notify_aggregator(self.sls_aggregator_ep, channel, self.aggregator_url)
+    #     elif channel.my_role() == "aggregator":
+    #         logger.info("Aggregator-side gRPC client has been disabled")
+    #     else:
+    #         raise SystemError("rejoin is only supported for trainer or aggregator")
+
+    #     while True:
+    #         await asyncio.sleep(HEART_BEAT_DURATION)
+
+    # def rejoin(self, channel) -> None:
+    #     """Rejoin a channel."""
+
+    #     async def _join_inner():
+    #         coro = self._register_channel_again(channel)
+    #         _ = asyncio.create_task(coro)
+
+    #     coro = _join_inner()
+    #     _, success = run_async(coro, self._loop, DEFAULT_RUN_ASYNC_WAIT_TIME)
+    #     if not success:
+    #         raise SystemError("rejoin failure")
 
 class LiveChecker:
     """LiveChecker class."""

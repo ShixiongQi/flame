@@ -29,7 +29,7 @@ from flame.config import Config
 from flame.selectors import selector_provider
 
 logger = logging.getLogger(__name__)
-
+logger.setLevel(logging.DEBUG)
 
 def custom_excepthook(exc_type, exc_value, exc_traceback):
     """Implement a custom exception hook.
@@ -116,7 +116,7 @@ class ChannelManager(object):
 
         # set up a default backend
         sort = self._config.backend
-        self._backend = backend_provider.get(sort)
+        self._backend = backend_provider.get(sort, role = self._role)
         broker_host = self._config.brokers.sort_to_host[sort]
         self._backend.configure(broker_host, self._job_id, self._task_id)
         _ = run_async(inner(self._backend.eventq()), self._backend.loop())
@@ -132,9 +132,31 @@ class ChannelManager(object):
     def join_all(self) -> None:
         """join_all ensures that a role joins all of its channels."""
         for ch_name in self._config.channels.keys():
-            self.join(ch_name)
+            self.join(ch_name, None)
 
-    def join(self, name: str) -> bool:
+    def join_cp(self) -> None:
+        """join_cp ensures that a role only joins control plane channels (between coordinator and others)."""
+        logger.info(f"Channels: {self._config.channels.keys()}")
+        for ch_name in self._config.channels.keys():
+            channel_config = self._config.channels[ch_name]
+
+            if "coordinator" == channel_config.pair[0] or "coordinator" == channel_config.pair[1]:
+                self.join(ch_name, None, 0)
+            else:
+                logger.info(f"{ch_name} is a dataplane channel... Skip it for now.")
+                continue
+
+    def join_dp(self, mid_agg_urls: dict, num_ends: int) -> None:
+        """join_dp ensures that a role only joins dataplane channels (top_aggregator -> mid_aggregator, trainer -> mid_aggregator)."""
+        for ch_name in self._config.channels.keys():
+            channel_config = self._config.channels[ch_name]
+
+            if "coordinator" == channel_config.pair[0] or "coordinator" == channel_config.pair[1]:
+                continue
+            else:
+                self.join(ch_name, mid_agg_urls, num_ends)
+
+    def join(self, name: str, mid_agg_urls: dict, num_ends: int) -> bool:
         """Join a channel."""
         if self.is_joined(name):
             return True
@@ -163,7 +185,7 @@ class ChannelManager(object):
             backend = self._backend
 
         self._channels[name] = Channel(
-            backend, selector, self._job_id, name, me, other, groupby
+            num_ends, mid_agg_urls, backend, selector, self._job_id, name, me, other, groupby
         )
         self._channels[name].join()
 
@@ -186,6 +208,7 @@ class ChannelManager(object):
         """Return a channel object in a given channel name."""
         if not self.is_joined(name):
             # didn't join the channel yet
+            logger.warning(f"{name} hasn't been joined")
             return None
 
         return self._channels[name]

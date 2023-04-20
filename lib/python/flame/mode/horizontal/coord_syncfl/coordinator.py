@@ -25,7 +25,7 @@ from flame.mode.role import Role
 from flame.mode.tasklet import Loop, Tasklet
 
 logger = logging.getLogger(__name__)
-
+logger.setLevel(logging.DEBUG)
 TAG_COORDINATE_WITH_TOP_AGG = "coordinateWithTopAgg"
 TAG_COORDINATE_WITH_MID_AGG = "coordinateWithMidAgg"
 TAG_COORDINATE_WITH_TRAINER = "coordinateWithTrainer"
@@ -41,13 +41,15 @@ class Coordinator(Role):
         self._round = 1
         self._work_done = False
 
+        self.mid_agg_urls = dict()
+
         self.agg_to_trainer = dict()
         self.trainer_to_agg = dict()
 
     def build_channel_manager(self):
         channel_manager = ChannelManager()
         channel_manager(self.config)
-        channel_manager.join_all()
+        channel_manager.join_cp()
 
         return channel_manager
 
@@ -83,6 +85,9 @@ class Coordinator(Role):
         trainer_ends = trainer_channel.ends()
         agg_ends = aggregator_channel.ends()
 
+        # reset mid aggregator url
+        self.mid_agg_urls = dict()
+
         # send meta information request
         for agg_end in agg_ends:
             logger.debug(f"sending meta info req to {agg_end}")
@@ -99,6 +104,7 @@ class Coordinator(Role):
             # meta info can be used to mapping middle aggregators to trainers
             # TODO: implement necessary logic
             logger.info(f"got {msg[MessageType.META_INFO_RES]} from {end}")
+            self.mid_agg_urls[end] = msg[MessageType.META_INFO_RES]
 
         agg_ends = [end for end in agg_ends if end not in bad_ends]
 
@@ -135,7 +141,11 @@ class Coordinator(Role):
 
             mid_aggs.append(agg)
 
-        msg = {MessageType.COORDINATED_ENDS: mid_aggs, MessageType.EOT: self._work_done}
+        msg = {
+            MessageType.COORDINATED_ENDS: mid_aggs, 
+            MessageType.EOT: self._work_done,
+            MessageType.MID_AGGS_URL: self.mid_agg_urls
+        }
         end = top_agg_channel.one_end()
         top_agg_channel.send(end, msg)
 
@@ -160,7 +170,11 @@ class Coordinator(Role):
         trainer_channel = self.get_channel(TAG_COORDINATE_WITH_TRAINER)
 
         for trainer, agg in self.trainer_to_agg.items():
-            msg = {MessageType.COORDINATED_ENDS: agg, MessageType.EOT: self._work_done}
+            msg = {
+                MessageType.COORDINATED_ENDS: agg, 
+                MessageType.EOT: self._work_done,
+                MessageType.MID_AGGS_URL: self.mid_agg_urls[agg]
+            }
             trainer_channel.send(trainer, msg)
         logger.debug("exited send_selected_middle_aggregator()")
 

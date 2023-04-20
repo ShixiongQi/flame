@@ -45,3 +45,5 @@ class MessageType(Enum):
 
     META_INFO_REQ = 13  # Request for meta information
     META_INFO_RES = 14  # Response that contains meta information
+
+    MID_AGGS_URL = 15 # URL info of mid aggs
