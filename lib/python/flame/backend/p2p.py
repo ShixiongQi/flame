@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 ENDPOINT_TOKEN_LEN = 2
-HEART_BEAT_DURATION = 30  # for metaserver
+META_SVR_HEART_BEAT_DURATION = 30  # for metaserver
 
 PEER_HEART_BEAT_PERIOD = 200  # NOTE: Change PEER_HEART_BEAT_PERIOD to a large value to avoid scaling issue
 PEER_HEART_BEAT_WAIT_TIME = 15 * PEER_HEART_BEAT_PERIOD
@@ -122,6 +122,7 @@ class PointToPointBackend(AbstractBackend):
         self._context_keeper = dict()
         self.tx_tasks = dict()
         self._cleanup_ready = dict()
+        self.meta_svr_heartbeat = dict()
 
         # variables for serverless setup
         self.dummy_client_task = None
@@ -222,6 +223,11 @@ class PointToPointBackend(AbstractBackend):
 
             # remove channel from _channels
             del self._channels[channel.name()]
+
+            # This enable to stop sending meta svr heart beat
+            # after sleep for a heart beat duration
+            # (i.e., META_SVR_HEART_BEAT_DURATION)
+            self.meta_svr_heartbeat[channel.name()] = False
 
             # prepare a leave message
             msg = msg_pb2.Notify(
@@ -395,10 +401,13 @@ class PointToPointBackend(AbstractBackend):
                 #         logger.info(f"connecting to endpoint: {endpoint}")
                 #         await self._connect_and_notify(endpoint, channel)
 
-            while True:
+            channel_name = channel.name()
+            self.meta_svr_heartbeat[channel_name] = True
+            while self.meta_svr_heartbeat[channel_name]:
                 meta_resp = stub.HeartBeat(meta_info)
                 logger.debug(f"meta_resp from heart beat: {meta_resp}")
-                await asyncio.sleep(HEART_BEAT_DURATION)
+                await asyncio.sleep(META_SVR_HEART_BEAT_DURATION)
+            logger.debug(f"out form meta server heart beat loop on {channel_name}")
 
     async def _passive_register_channel(self, channel) -> None:
         logger.info(f"calling _passive_register_channel")
@@ -781,6 +790,7 @@ class PointToPointBackend(AbstractBackend):
         3) remove end_id from delayed_channel_add
         4) remove end_id from _livecheck
         5) remove end id from channel
+        6) stop the chunk thread in chunk manager
 
         Note 1: Steps 1-3 are to release resources related to send/recv
         in the backend first and quickly so that we don't get any new
@@ -828,6 +838,9 @@ class PointToPointBackend(AbstractBackend):
         for _, channel in self._channels.items():
             # remove the end id from the channel
             await channel.remove(end_id)
+
+        # stop the chunk thread responsible for handling messages from end_id
+        self.chunk_mgr.stop(end_id)
 
     def _set_heart_beat(self, end_id) -> None:
         logger.debug(f"heart beat data message for {end_id}")
