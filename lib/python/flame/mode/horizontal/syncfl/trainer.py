@@ -19,7 +19,7 @@ import logging
 
 from flame.channel import VAL_CH_STATE_RECV, VAL_CH_STATE_SEND
 from flame.channel_manager import ChannelManager
-from flame.common.constants import DeviceType, TrainerState
+from flame.common.constants import DeviceType
 from flame.common.custom_abcmeta import ABCMeta, abstract_attribute
 from flame.common.util import (
     MLFramework,
@@ -147,7 +147,6 @@ class Trainer(Role, metaclass=ABCMeta):
                 msg[MessageType.DATASAMPLER_METADATA]
             )
 
-        self.regularizer.save_state(TrainerState.PRE_TRAIN, glob_model=self.model)
         logger.debug(f"work_done: {self._work_done}, round: {self._round}")
 
     def put(self, tag: str) -> None:
@@ -190,12 +189,8 @@ class Trainer(Role, metaclass=ABCMeta):
         end = channel.one_end(VAL_CH_STATE_SEND)
 
         self._update_weights()
-        self.regularizer.save_state(TrainerState.POST_TRAIN, loc_model=self.model)
 
         delta_weights = self._delta_weights_fn(self.weights, self.prev_weights)
-
-        # send delta_weights to regularizer
-        self.regularizer.update()
 
         msg = {
             MessageType.WEIGHTS: weights_to_device(delta_weights, DeviceType.CPU),

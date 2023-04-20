@@ -23,16 +23,14 @@ import time
 from typing import AsyncIterable, Iterable
 
 import grpc
-
-from ..common.constants import (DEFAULT_RUN_ASYNC_WAIT_TIME, EMPTY_PAYLOAD,
-                                BackendEvent, CommType)
-from ..common.util import background_thread_loop, run_async
-from ..proto import backend_msg_pb2 as msg_pb2
-from ..proto import backend_msg_pb2_grpc as msg_pb2_grpc
-from ..proto import meta_pb2, meta_pb2_grpc
-from .abstract import AbstractBackend
-from .chunk_manager import ChunkManager
-from .chunk_store import ChunkStore
+from flame.backend.abstract import AbstractBackend
+from flame.backend.chunk_manager import ChunkManager
+from flame.backend.chunk_store import ChunkStore
+from flame.common.constants import DEFAULT_RUN_ASYNC_WAIT_TIME, EMPTY_PAYLOAD, CommType
+from flame.common.util import background_thread_loop, run_async
+from flame.proto import backend_msg_pb2 as msg_pb2
+from flame.proto import backend_msg_pb2_grpc as msg_pb2_grpc
+from flame.proto import meta_pb2, meta_pb2_grpc
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -54,13 +52,13 @@ class BackendServicer(msg_pb2_grpc.BackendRouteServicer):
         """Initialize."""
         self.p2pbe = p2pbe
 
-    async def notify_end(self, req: msg_pb2.Notify,
-                         unused_context) -> msg_pb2.Notify:
+    async def notify_end(self, req: msg_pb2.Notify, unused_context) -> msg_pb2.Notify:
         """Implement a method to handle Notification request."""
         return await self.p2pbe._handle_notification(req)
 
-    async def send_data(self, req_iter: AsyncIterable[msg_pb2.Data],
-                        unused_context) -> msg_pb2.BackendID:
+    async def send_data(
+        self, req_iter: AsyncIterable[msg_pb2.Data], unused_context
+    ) -> msg_pb2.BackendID:
         """Implement a method to handle send_data request stream."""
         # From server perspective, the server receives data from client.
         async for msg in req_iter:
@@ -72,23 +70,27 @@ class BackendServicer(msg_pb2_grpc.BackendRouteServicer):
 
         return msg_pb2.BackendID(end_id=self.p2pbe._id)
 
-    async def recv_data(self, req: msg_pb2.BackendID,
-                        context) -> AsyncIterable[msg_pb2.Data]:
+    async def recv_data(
+        self, req: msg_pb2.BackendID, context
+    ) -> AsyncIterable[msg_pb2.Data]:
         """Implement a method to handle recv_data request."""
         # From server perspective, the server sends data to client.
-        dck_task = asyncio.create_task(self._dummy_context_keeper(context))
+        ck_task = asyncio.create_task(self._context_keeper(req.end_id, context))
         await self.p2pbe._set_writer(req.end_id, context)
         self.p2pbe._set_heart_beat(req.end_id)
 
-        await dck_task
+        await ck_task
 
-    async def _dummy_context_keeper(self, context):
+    async def _context_keeper(self, end_id, context):
         """Block the call with an event to keep context alive."""
-        unreachable_event = asyncio.Event()
+        event = asyncio.Event()
 
-        # blocked here forever
-        await unreachable_event.wait()
-        logger.debug("must not reach here until termination!")
+        self.p2pbe._context_keeper[end_id] = event
+        # blocked here until p2p backend explictly trigger the event
+        # this event can occur only when the backend leaves a channel
+        # and the channel has the end id
+        await event.wait()
+        logger.debug("context release event got triggered!")
 
 
 class PointToPointBackend(AbstractBackend):
@@ -101,8 +103,6 @@ class PointToPointBackend(AbstractBackend):
         """Initialize an instance."""
         self._instance = None
         self._initialized = False
-        # queue to inform channel manager of backend's events
-        self._eventq = None
         self._loop = None
 
         # variables for functionality
@@ -115,14 +115,16 @@ class PointToPointBackend(AbstractBackend):
         self._backend = None
         self._role = role
 
-        self._endpoints = {}
-        self._channels = {}
-        self._livecheck = {}
-        self.delayed_channel_add = {}
-        self.tx_tasks = []
-        self.dummy_client_task = None
+        self._channels = dict()
+        self._endpoints = dict()
+        self._livecheck = dict()
+        self.delayed_channel_add = dict()
+        self._context_keeper = dict()
+        self.tx_tasks = dict()
+        self._cleanup_ready = dict()
 
         # variables for serverless setup
+        self.dummy_client_task = None
         self.aggregator_url = None
         self.ingress_ip = os.environ["KN_INGRESS_IP"]
         self.ingress_port = os.environ["KN_INGRESS_PORT"]
@@ -132,11 +134,9 @@ class PointToPointBackend(AbstractBackend):
             self._loop = loop
 
         # initialize a chunk manager
-        self.chunk_mgr = ChunkManager(self._loop)
+        self.chunk_mgr = ChunkManager(self)
 
         async def _init_loop_stuff():
-            self._eventq = asyncio.Queue()
-
             coro = self._setup_server()
             _ = asyncio.create_task(coro)
 
@@ -149,12 +149,13 @@ class PointToPointBackend(AbstractBackend):
         self._initialized = True
 
     async def _setup_server(self):
-        server = grpc.aio.server(options=[("grpc.max_send_message_length",
-                                           GRPC_MAX_MESSAGE_LENGTH),
-                                          ("grpc.max_receive_message_length",
-                                           GRPC_MAX_MESSAGE_LENGTH)])
-        msg_pb2_grpc.add_BackendRouteServicer_to_server(
-            BackendServicer(self), server)
+        server = grpc.aio.server(
+            options=[
+                ("grpc.max_send_message_length", GRPC_MAX_MESSAGE_LENGTH),
+                ("grpc.max_receive_message_length", GRPC_MAX_MESSAGE_LENGTH),
+            ]
+        )
+        msg_pb2_grpc.add_BackendRouteServicer_to_server(BackendServicer(self), server)
 
         logger.info(f"Role of current compute: {self._role}")
         if "aggregator" in self._role:
@@ -177,10 +178,6 @@ class PointToPointBackend(AbstractBackend):
         self._job_id = job_id
         self._id = task_id
 
-    def eventq(self):
-        """Return a event queue object."""
-        return self._eventq
-
     def loop(self):
         """Return loop instance of asyncio."""
         return self._loop
@@ -201,21 +198,92 @@ class PointToPointBackend(AbstractBackend):
         if not success:
             raise SystemError("join failure")
 
-    def create_tx_task(self,
-                       channel_name: str,
-                       end_id: str,
-                       comm_type=CommType.UNICAST) -> bool:
+    def leave(self, channel) -> None:
+        """Leave a given channel.
+
+        This method carries the following steps:
+        - remove channel from _channels dictionary so that no further
+          actions can be made against the channel at the backend level
+
+        - send a leave message to all the ends in the other side of channel
+
+        - for each end id in end ids in the channel, call _cleanup_end(end_id),
+          which terminates rx task, releases data in _endpoints, _livecheck,
+          delayed_channel_add and _context_keeper, and calls channel.remove()
+
+        - terminate tx tasks by putting EMPTY_PAYLOAD in tx queue of each task
+        """
+
+        async def _leave_inner():
+            if channel.name() not in self._channels:
+                return
+
+            logger.debug(f"clean up resources for {channel.name()}")
+
+            # remove channel from _channels
+            del self._channels[channel.name()]
+
+            # prepare a leave message
+            msg = msg_pb2.Notify(
+                end_id=self._id,
+                channel_name=channel.name(),
+                type=msg_pb2.NotifyType.LEAVE,
+            )
+            # send out a leave message to all ends in the other side of
+            # the channel
+            for end_id in list(channel._ends.keys()):
+                if end_id not in self._endpoints:
+                    continue
+
+                _, svr_writer, clt_writer, _ = self._endpoints[end_id]
+                if clt_writer is not None:
+                    await clt_writer.notify_end(msg)
+                elif svr_writer is not None:
+                    logger.info("server-side leave channel not implemented")
+                    # TODO: server-side leave channel is not implemented
+                    # we can't use svr_writer because it's context for
+                    # recv_data in BackendServicer; we need to make changes
+                    # for notify_end in BackendServicer
+
+            for end_id in list(channel._ends.keys()):
+                await self._cleanup_end(end_id)
+                # while self._cleanup_end() calls channel.remove(),
+                # calling this function again is necessary because we already
+                # removed this channel from self._channels
+                await channel.remove(end_id)
+
+            # we use EMPTY_PAYLOAD as signal to finish tx tasks
+            # put EMPTY_PAYLOAD to broadcast queue
+            await channel._bcast_queue.put(EMPTY_PAYLOAD)
+            for _, end in channel._ends.items():
+                # put EMPTY_PAYLOAD to unicast queue for each end
+                await end.put(EMPTY_PAYLOAD)
+
+            await self.await_tx_tasks_done(channel.name())
+
+        coro = _leave_inner()
+        # _, success = run_async(coro, self._loop, DEFAULT_RUN_ASYNC_WAIT_TIME)
+        _, success = run_async(coro, self._loop)
+        if not success:
+            raise SystemError("leave failure")
+
+    def create_tx_task(
+        self, channel_name: str, end_id: str, comm_type=CommType.UNICAST
+    ) -> bool:
         """Create asyncio task for transmission."""
-        if (channel_name not in self._channels
-                or (not self._channels[channel_name].has(end_id)
-                    and comm_type != CommType.BROADCAST)):
+        if channel_name not in self._channels or (
+            not self._channels[channel_name].has(end_id)
+            and comm_type != CommType.BROADCAST
+        ):
             return False
 
         channel = self._channels[channel_name]
 
         coro = self._tx_task(channel, end_id, comm_type)
         task = asyncio.create_task(coro)
-        self.tx_tasks.append(task)
+        if channel_name not in self.tx_tasks:
+            self.tx_tasks[channel_name] = list()
+        self.tx_tasks[channel_name].append(task)
 
     def kill_dummy_client(self,
                             channel_name: str,
@@ -343,9 +411,11 @@ class PointToPointBackend(AbstractBackend):
     async def _connect_and_notify(self, endpoint: str, channel) -> None:
         grpc_ch = grpc.aio.insecure_channel(
             endpoint,
-            options=[("grpc.max_send_message_length", GRPC_MAX_MESSAGE_LENGTH),
-                     ("grpc.max_receive_message_length",
-                      GRPC_MAX_MESSAGE_LENGTH)])
+            options=[
+                ("grpc.max_send_message_length", GRPC_MAX_MESSAGE_LENGTH),
+                ("grpc.max_receive_message_length", GRPC_MAX_MESSAGE_LENGTH),
+            ],
+        )
         stub = msg_pb2_grpc.BackendRouteStub(grpc_ch)
 
         await self.notify(channel, msg_pb2.NotifyType.JOIN, stub, grpc_ch, "")
@@ -377,9 +447,9 @@ class PointToPointBackend(AbstractBackend):
             logger.debug(f"channel {channel.name()} not found")
             return False
 
-        msg = msg_pb2.Notify(end_id=self._id,
-                             channel_name=channel.name(),
-                             type=notify_type)
+        msg = msg_pb2.Notify(
+            end_id=self._id, channel_name=channel.name(), type=notify_type
+        )
 
         if notify_type == msg_pb2.NotifyType.UNKNOWN_NOTIFY_TYPE:
             try:
@@ -418,10 +488,11 @@ class PointToPointBackend(AbstractBackend):
         return True
 
     async def _handle_notification(
-            self,
-            msg: msg_pb2.Notify,
-            stub: msg_pb2_grpc.BackendRouteStub = None,
-            grpc_ch: grpc.aio.Channel = None) -> msg_pb2.Notify:
+        self,
+        msg: msg_pb2.Notify,
+        stub: msg_pb2_grpc.BackendRouteStub = None,
+        grpc_ch: grpc.aio.Channel = None,
+    ) -> msg_pb2.Notify:
         if msg.end_id == self._id:
             # This case happens when message is broadcast to a self-loop
             # e.g., distributed topology
@@ -445,13 +516,16 @@ class PointToPointBackend(AbstractBackend):
                 self._endpoints[msg.end_id] = (reader, None, stub, grpc_ch)
                 _ = asyncio.create_task(self._rx_task(msg.end_id, reader))
 
+                if msg.end_id not in self._cleanup_ready:
+                    self._cleanup_ready[msg.end_id] = asyncio.Event()
+                    self._cleanup_ready[msg.end_id].set()
                 # add end to the channel
                 await channel.add(msg.end_id)
             else:  # this is server
                 # server needs to wait for writer context so that it can be ready
                 # to send messages. here we can't call "channel.add(msg.end_id)."
                 # therefore, we save info for adding end to a channel here.
-                # we do actuall addition in _set_writer() method.
+                # we do actual addition in _set_writer() method.
                 logger.info("server needs to wait for writer context")
                 if msg.end_id not in self.delayed_channel_add:
                     self.delayed_channel_add[msg.end_id] = []
@@ -460,14 +534,15 @@ class PointToPointBackend(AbstractBackend):
             # this is the first time to see this end,
             # so let's notify my presence to the end
             logger.debug("acknowledge notification")
-            return msg_pb2.Notify(end_id=self._id,
-                                  channel_name=msg.channel_name,
-                                  type=msg_pb2.NotifyType.JOIN)
+            return msg_pb2.Notify(
+                end_id=self._id,
+                channel_name=msg.channel_name,
+                type=msg_pb2.NotifyType.JOIN,
+            )
 
         elif msg.type == msg_pb2.NotifyType.LEAVE:
-            # it's sufficient to remove end from channel
-            # no extra action (e.g., unsubscribe) needed
-            await channel.remove(msg.end_id)
+            logger.debug(f"{msg.end_id} is leaving {msg.channel_name}")
+            await self._cleanup_end(msg.end_id)
         
         elif msg.type == msg_pb2.NotifyType.UNKNOWN_NOTIFY_TYPE:
             logger.info(f"{self._role} receiving online information from flame-aggregator-{msg.end_id}.flame.example.com")
@@ -484,8 +559,14 @@ class PointToPointBackend(AbstractBackend):
             logger.debug("message sent to self; do nothing")
             return
 
-        channel = self._channels[msg.channel_name]
-        self.chunk_mgr.handle(msg, channel)
+        if msg.channel_name in self._channels:
+            if msg.end_id in self._cleanup_ready:
+                # received data; so disable cleanup readiness for the end
+                logger.debug(f"block cleanup on {msg.end_id}")
+                self._cleanup_ready[msg.end_id].clear()
+
+            channel = self._channels[msg.channel_name]
+            self.chunk_mgr.handle(msg, channel)
 
     async def _tx_task(self, channel, end_id, comm_type: CommType):
         """Conducts data transmission in a loop.
@@ -525,8 +606,8 @@ class PointToPointBackend(AbstractBackend):
                 except Exception as ex:
                     ex_name = type(ex).__name__
                     logger.debug(f"An exception of type {ex_name} occurred")
-
                     await self._cleanup_end(end_id)
+
             txq.task_done()
 
         logger.debug(f"broadcast task for {channel.name()} terminated")
@@ -537,8 +618,7 @@ class PointToPointBackend(AbstractBackend):
 
         while True:
             try:
-                data = await asyncio.wait_for(txq.get(),
-                                              PEER_HEART_BEAT_PERIOD)
+                data = await asyncio.wait_for(txq.get(), PEER_HEART_BEAT_PERIOD)
             except asyncio.TimeoutError:
                 if end_id not in self._endpoints:
                     logger.debug(f"end_id {end_id} not in _endpoints")
@@ -553,11 +633,13 @@ class PointToPointBackend(AbstractBackend):
                     #    channel_name = ""
                     #    seqno = -1
                     #    eom = True
-                    msg = msg_pb2.Data(end_id=self._id,
-                                       channel_name="",
-                                       payload=EMPTY_PAYLOAD,
-                                       seqno=-1,
-                                       eom=True)
+                    msg = msg_pb2.Data(
+                        end_id=self._id,
+                        channel_name="",
+                        payload=EMPTY_PAYLOAD,
+                        seqno=-1,
+                        eom=True,
+                    )
 
                     yield msg
 
@@ -575,7 +657,6 @@ class PointToPointBackend(AbstractBackend):
             except Exception as ex:
                 ex_name = type(ex).__name__
                 logger.debug(f"An exception of type {ex_name} occurred")
-
                 await self._cleanup_end(end_id)
                 txq.task_done()
                 # This break ends a tx_task for end_id
@@ -592,8 +673,7 @@ class PointToPointBackend(AbstractBackend):
         # TODO: keep regenerating messages can be expensive; revisit this later
         if clt_writer is not None:
             logger.info(f"clt_writer ({self._role}) sends chunks to {other} via {ch_name} || data length {len(data)} Bytes")
-            await clt_writer.send_data(
-                self._generate_data_messages(ch_name, data))
+            await clt_writer.send_data(self._generate_data_messages(ch_name, data))
         elif svr_writer is not None:
             logger.info(f"svr_writer ({self._role}) sends chunks to {other} via {ch_name} || data length {len(data)} Bytes")
             for msg in self._generate_data_messages(ch_name, data):
@@ -601,8 +681,9 @@ class PointToPointBackend(AbstractBackend):
         else:
             logger.debug("writer not found}")
 
-    def _generate_data_messages(self, ch_name: str,
-                                data: bytes) -> Iterable[msg_pb2.Data]:
+    def _generate_data_messages(
+        self, ch_name: str, data: bytes
+    ) -> Iterable[msg_pb2.Data]:
         chunk_store = ChunkStore()
         chunk_store.set_data(data)
 
@@ -611,16 +692,17 @@ class PointToPointBackend(AbstractBackend):
             if chunk is None:
                 break
 
-            msg = msg_pb2.Data(end_id=self._id,
-                               channel_name=ch_name,
-                               payload=chunk,
-                               seqno=seqno,
-                               eom=eom)
+            msg = msg_pb2.Data(
+                end_id=self._id,
+                channel_name=ch_name,
+                payload=chunk,
+                seqno=seqno,
+                eom=eom,
+            )
 
             yield msg
 
-    async def _set_writer(self, end_id: str,
-                          context: grpc.aio.ServicerContext) -> None:
+    async def _set_writer(self, end_id: str, context: grpc.aio.ServicerContext) -> None:
         if end_id in self._endpoints:
             logger.debug(f"{end_id} is already registered")
             return
@@ -633,6 +715,9 @@ class PointToPointBackend(AbstractBackend):
             return
 
         for channel in self.delayed_channel_add[end_id]:
+            if end_id not in self._cleanup_ready:
+                self._cleanup_ready[end_id] = asyncio.Event()
+                self._cleanup_ready[end_id].set()
             # add end to the channel
             await channel.add(end_id)
 
@@ -658,28 +743,110 @@ class PointToPointBackend(AbstractBackend):
 
         logger.debug(f"cleaned up {end_id} info from _endpoints")
 
+    async def set_cleanup_ready_async(self, end_id: str) -> None:
+        """Set cleanup ready event for a given end id.
+
+        This should be called in self._loop thread.
+        """
+        if end_id in self._cleanup_ready:
+            self._cleanup_ready[end_id].set()
+
+    def set_cleanup_ready(self, end_id: str) -> None:
+        """Set cleanup ready event for a given end id.
+
+        This should be called in non self._loop thread.
+        The goal of this functionality is to make sure that any pending
+        message in rx queue is consumed.
+
+        The following describes how to set and clear the cleanup ready event
+        throughout the backend.
+        When a data message arrives to the backend from an end (end_id),
+        the event is cleared (which means that the cleanup can't take place
+        until the event is set again). If the message somehow can't be
+        inserted into a rx queue (such a case can happen in chunk_manager),
+        the event will be set again (which clears the blocking).
+        After the message is inserted in the rx queue, the event will be then
+        set when recv() or recv_fifo() is called, which is an indicator that
+        message is processed. Once the event is set, self._cleanup_end() can
+        proceed.
+        """
+        _, _ = run_async(self.set_cleanup_ready_async(end_id), self._loop)
+
     async def _cleanup_end(self, end_id):
-        await self._eventq.put((BackendEvent.DISCONNECT, end_id))
-        if end_id in self._endpoints:
+        """Clean up resoure in the backend related to end_id.
+
+        This function is executed in a the following order:
+        1) remove end_id from _endpoints
+        2) remove end_id from _context_keeper
+        3) remove end_id from delayed_channel_add
+        4) remove end_id from _livecheck
+        5) remove end id from channel
+
+        Note 1: Steps 1-3 are to release resources related to send/recv
+        in the backend first and quickly so that we don't get any new
+        unexpected messages in tx/rx queues.
+        Note 2: If one wishes to change the order of these steps, do it
+        carefully.
+        """
+        # remove end_id from _endpoints
+        if end_id in list(self._endpoints.keys()):
+            reader, _, _, _ = self._endpoints[end_id]
+            if reader:
+                # this will enable termination of rx task associated with
+                # this client stream by cancelling the stream
+                reader.cancel()
+            # this prevents further send/receive
             del self._endpoints[end_id]
-        if end_id in self._livecheck:
+
+        # remove end_id from _context_keeper
+        if end_id in list(self._context_keeper.keys()):
+            # end_id should be in the context_keeper if it was registered
+            # as client; release context of the client
+            # this prevents further send to grpc client
+            self._context_keeper[end_id].set()
+            del self._context_keeper[end_id]
+
+        # remove end_id from delayed_channel_add
+        if end_id in list(self.delayed_channel_add.keys()):
+            del self.delayed_channel_add[end_id]
+
+        # remove end_id from _livecheck
+        if end_id in list(self._livecheck.keys()):
             self._livecheck[end_id].cancel()
             del self._livecheck[end_id]
+
+        # wait for the cleanup ready event to be set for end_id
+        # to ensure that all the msg in the rx queue of the end
+        # is consumed
+        if end_id in self._cleanup_ready:
+            await self._cleanup_ready[end_id].wait()
+
+        logger.debug(f"ready to remove {end_id} from channel")
+
+        # linear iteration is okay because there are not many
+        # channels per role in general
+        for _, channel in self._channels.items():
+            # remove the end id from the channel
+            await channel.remove(end_id)
 
     def _set_heart_beat(self, end_id) -> None:
         logger.debug(f"heart beat data message for {end_id}")
         if end_id not in self._livecheck:
-            self._livecheck[end_id] = LiveChecker(self, end_id,
-                                                  PEER_HEART_BEAT_WAIT_TIME)
+            self._livecheck[end_id] = LiveChecker(
+                self, end_id, PEER_HEART_BEAT_WAIT_TIME
+            )
 
         self._livecheck[end_id].reset()
 
-    async def cleanup(self):
-        """Clean up resources in backend."""
-        # wait for tx tasks to be finished
-        logger.debug(f"waiting for {len(self.tx_tasks)} tasks to be done")
-        await asyncio.gather(*self.tx_tasks)
-        logger.debug("all done")
+    async def await_tx_tasks_done(self, channel_name: str):
+        """Wait for tx tasks of a given channel to be finished."""
+        if channel_name not in self.tx_tasks:
+            return
+
+        n = len(self.tx_tasks[channel_name])
+        logger.debug(f"waiting for {n} tasks to be done")
+        await asyncio.gather(*self.tx_tasks[channel_name])
+        logger.debug(f"all done for {channel_name}")
 
     # async def _register_channel_again(self, channel) -> None:
     #     logger.info("calling _register_channel_again")
