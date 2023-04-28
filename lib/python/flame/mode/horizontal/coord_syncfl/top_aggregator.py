@@ -15,12 +15,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import time
+from copy import deepcopy
 from datetime import datetime
 
 from diskcache import Cache
 from flame.channel_manager import ChannelManager
 from flame.mode.composer import Composer
-from flame.mode.horizontal.syncfl.top_aggregator import TAG_AGGREGATE, TAG_DISTRIBUTE
+from flame.mode.horizontal.syncfl.top_aggregator import TAG_AGGREGATE, TAG_DISTRIBUTE, PROP_ROUND_START_TIME, PROP_ROUND_END_TIME
 from flame.mode.horizontal.syncfl.top_aggregator import (
     TopAggregator as BaseTopAggregator,
 )
@@ -30,10 +32,12 @@ from flame.common.util import (
     get_ml_framework_in_use,
     mlflow_runname,
     weights_to_device,
+    weights_to_model_device,
 )
 from flame.mode.message import MessageType
 from flame.mode.tasklet import Loop, Tasklet
 from flame.plugin import PluginManager
+from flame.optimizer.train_result import TrainResult
 from flame.optimizers import optimizer_provider
 from flame.registries import registry_provider
 from flame.datasamplers import datasampler_provider
@@ -42,7 +46,6 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 TAG_COORDINATE = "coordinate"  # coordinate with the coordinator
-PROP_ROUND_START_TIME = "round_start_time"
 
 WAIT_TIME_FOR_MID_AGG = 60
 
@@ -54,7 +57,6 @@ class TopAggregator(BaseTopAggregator):
 
         self.cm = ChannelManager()
         self.cm(self.config)
-        # self.cm.join_all()
         self.cm.join_cp()
 
         self.registry_client = registry_provider.get(self.config.registry.sort)
@@ -110,7 +112,8 @@ class TopAggregator(BaseTopAggregator):
 
     def get_coordinated_ends(self):
         """Receive the ends of middle aggregators."""
-        logger.debug("calling get_coordinate_ends()")
+        print("\n\n")
+        logger.debug(f"Round [{self._round}] starts || calling get_coordinate_ends()")
         channel = self.get_channel(TAG_COORDINATE)
 
         end = channel.one_end()
@@ -129,10 +132,29 @@ class TopAggregator(BaseTopAggregator):
             self.cm.join_dp(msg[MessageType.MID_AGGS_URL], num_ends)
 
             dist_channel = self.cm.get_by_tag(TAG_DISTRIBUTE)
+
+        # this call waits for all middle aggregator to join this channel
+        self.mid_agg_no_show = dist_channel.await_ends_join(WAIT_TIME_FOR_MID_AGG)
+        if self.mid_agg_no_show:
+            logger.info("dist_channel await join timeouted")
+            logger.info(f"top-aggregator expects {dist_channel.num_ends} ends, but only {len(dist_channel._ends)} have joined")
+
         # overide distribute channel's ends method
         dist_channel.ends = lambda: msg[MessageType.COORDINATED_ENDS]
 
-        logger.debug("exited get_coordinate_ends()")
+        logger.debug("exited get_coordinate_ends()\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+
+    def _release_coordinated_ends(self):
+        """Release the ends of middle aggregators."""
+        dist_channel = self.cm.get_by_tag(TAG_DISTRIBUTE)
+
+        if not dist_channel:
+            raise ValueError(f"channel not found for tag {TAG_DISTRIBUTE}")
+
+        logger.info(f"Releasing channel [{dist_channel.name()}]")
+        self.cm.leave(dist_channel.name())
+
+        logger.debug("exited _release_coordinated_ends()\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
     def _distribute_weights(self, tag: str) -> None:
         channel = self.cm.get_by_tag(tag)
@@ -151,6 +173,10 @@ class TopAggregator(BaseTopAggregator):
 
         selected_ends = channel.ends()
         datasampler_metadata = self.datasampler.get_metadata(self._round, selected_ends)
+
+        logger.info("Listing items in channel._ends")
+        for k, v in channel._ends.items():
+            logger.info(f"{k}")
 
         # send out global model parameters to trainers
         for end in selected_ends:
@@ -171,6 +197,82 @@ class TopAggregator(BaseTopAggregator):
             channel.set_end_property(
                 end, PROP_ROUND_START_TIME, (round, datetime.now())
             )
+        
+        logger.debug("exited _distribute_weights()\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+
+    def _aggregate_weights(self, tag: str) -> None:
+        channel = self.cm.get_by_tag(tag)
+        if not channel:
+            return
+
+        total = 0
+
+        # receive local model parameters from trainers
+        #TODO: Take a diff and get the the endpoints (trainers) that haven't uploaded their model updates. This is required for Sync-FL and Semi-sync FL
+        # for end, msg in channel.recv_fifo(self.remaining_ends()):
+        for msg, metadata in channel.recv_fifo(channel.ends()):
+            end, timestamp = metadata
+            if not msg:
+                logger.debug(f"No data from {end}; skipping it")
+                continue
+
+            logger.debug(f"received data from {end}")
+            # channel.set_end_property(end, PROP_ROUND_END_TIME, (round, timestamp))
+
+            if MessageType.WEIGHTS in msg:
+                weights = weights_to_model_device(msg[MessageType.WEIGHTS], self.model)
+
+            if MessageType.DATASET_SIZE in msg:
+                count = msg[MessageType.DATASET_SIZE]
+
+            if MessageType.DATASAMPLER_METADATA in msg:
+                self.datasampler.handle_metadata_from_trainer(
+                    msg[MessageType.DATASAMPLER_METADATA],
+                    end,
+                    channel,
+                )
+
+            logger.debug(f"{end}'s parameters trained with {count} samples")
+
+            # logger.info(f"Adding {end} to received list")
+            # self.received_ends.append(end)
+
+            if weights is not None and count > 0:
+                total += count
+                tres = TrainResult(weights, count)
+                # save training result from trainer in a disk cache
+                self.cache[end] = tres
+                #TODO: Save cache to DB
+
+        if channel.my_role() == "aggregator":
+            logger.info("Aggregator creates a dummy client to keep itself warm")
+            channel.run_dummy_client()
+        
+        # time.sleep(60) # Sleep longer than grace period
+
+        # optimizer conducts optimization (in this case, aggregation)
+        global_weights = self.optimizer.do(
+            deepcopy(self.weights),
+            self.cache,
+            total=total,
+            num_trainers=len(channel.ends()),
+        )
+        if global_weights is None:
+            logger.debug("failed model aggregation")
+            time.sleep(1)
+            return
+
+        # set global weights
+        self.weights = global_weights
+
+        # update model with global weights
+        self._update_model()
+
+        if channel.my_role() == "aggregator":
+            logger.info("Aggregator terminates the dummy client to disable keep-warm")
+            channel.terminate_dummy_client()
+
+        logger.debug("exited _aggregate_weights()\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
     def compose(self) -> None:
         """Compose role with tasklets."""
@@ -184,6 +286,8 @@ class TopAggregator(BaseTopAggregator):
             task_load_data = Tasklet("", self.load_data)
 
             task_get_coord_ends = Tasklet("", self.get_coordinated_ends)
+
+            task_release_coordinated_ends = Tasklet("", self._release_coordinated_ends)
 
             task_put = Tasklet("", self.put, TAG_DISTRIBUTE)
 
@@ -219,6 +323,7 @@ class TopAggregator(BaseTopAggregator):
                 >> task_save_metrics
                 >> task_save_model
                 >> task_increment_round
+                >> task_release_coordinated_ends
             )
             >> task_save_params
         )

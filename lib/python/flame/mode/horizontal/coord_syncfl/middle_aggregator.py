@@ -55,14 +55,13 @@ class MiddleAggregator(BaseMiddleAggregator):
 
         self.cm = ChannelManager()
         self.cm(self.config)
-        # self.cm.join_all()
         self.cm.join_cp()
 
         self.optimizer = optimizer_provider.get(
             self.config.optimizer.sort, **self.config.optimizer.kwargs
         )
 
-        self._round = 1
+        self._round = 0
         self._work_done = False
 
         self.cache = Cache()
@@ -95,7 +94,8 @@ class MiddleAggregator(BaseMiddleAggregator):
         return channel
 
     def _get_trainers(self) -> None:
-        logger.debug("getting trainers from coordinator")
+        print("\n\n")
+        logger.debug(f"Round [{self._round + 1}] starts || getting trainers from coordinator")
 
         channel = self.get_channel(TAG_COORDINATE)
 
@@ -134,40 +134,62 @@ class MiddleAggregator(BaseMiddleAggregator):
         while dist_channel == None:
             logger.info("No dist_channel found... joining data plane channel")
             num_ends = len(msg[MessageType.COORDINATED_ENDS])
-            self.cm.join_dp(None, num_ends)
+            if num_ends == 0:
+                logger.info(f"{num_ends} end(s) received... skip joining dataplane channel for Round#{self._round + 1}")
+                return
+            else:
+                logger.info(f"mid aggregator join {num_ends} end(s) [{msg[MessageType.COORDINATED_ENDS]}]")
+                self.cm.join_dp(None, num_ends)
 
             dist_channel = self.cm.get_by_tag(TAG_DISTRIBUTE)
         # overide distribute channel's ends method
         dist_channel.ends = lambda: msg[MessageType.COORDINATED_ENDS]
 
-        logger.debug("exited _get_trainers")
+        logger.debug("exited _get_trainers\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
-    # def _release_trainers(self):
-    #     logger.debug("calling _release_trainers")
-    #     dist_channel = self.cm.get_by_tag(TAG_DISTRIBUTE)
-    #     agg_channel = self.cm.get_by_tag(TAG_AGGREGATE)
+    def _release_trainers(self):
+        dist_channel = self.cm.get_by_tag(TAG_DISTRIBUTE)
+        agg_channel = self.cm.get_by_tag(TAG_AGGREGATE)
 
-    #     # logger.info(f"Distribute channel: {dist_channel.name()}")
-    #     # logger.info(f"Aggregate channel: {agg_channel.name()}")
-    #     # self.cm.channel_leave(agg_channel.name())
-    #     logger.info(f"Clean up channel: {agg_channel.name()}")
-    #     agg_channel.cleanup()
+        if dist_channel is None or agg_channel is None:
+            logger.info(f"channel for tag {TAG_DISTRIBUTE}/{TAG_AGGREGATE} hasn't been created")
+            return
 
-    #     for end_id, end in agg_channel._ends.items():
-    #         del agg_channel._backend._endpoints[end_id]
-    #         del end
+        if dist_channel.name() == agg_channel.name():
+            logger.info(f"Releasing channel [{agg_channel.name()}]")
+        else:
+            logger.error(f"channel name not match: [{dist_channel.name()}] and [{agg_channel.name()}]")
+        self.cm.leave(agg_channel.name())
 
-    #     # del self.cm.get(agg_channel.name())
-    #     del agg_channel
+        logger.debug("exited _release_trainers\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+
+    def _release_top_aggs(self):
+        fetch_channel = self.cm.get_by_tag(TAG_FETCH)
+        upload_channel = self.cm.get_by_tag(TAG_UPLOAD)
+
+        if fetch_channel is None or upload_channel is None:
+            logger.info(f"channel for tag {TAG_FETCH}/{TAG_UPLOAD} hasn't been created")
+            return
+
+        if fetch_channel.name() == upload_channel.name():
+            logger.info(f"Releasing channel [{fetch_channel.name()}]")
+        else:
+            logger.error(f"channel name not match: [{fetch_channel.name()}] and [{upload_channel.name()}]")
+        self.cm.leave(fetch_channel.name())
+
+        logger.debug("exited _release_top_aggs\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
     def _handle_no_trainer(self):
         channel = self.cm.get_by_tag(TAG_DISTRIBUTE)
 
         self.no_trainer = False
-        if len(channel.ends()) == 0:
+        # if len(channel.ends()) == 0:
+        if channel is None:
             logger.debug("no trainers found")
             self.no_trainer = True
             return
+
+        logger.debug("exited _handle_no_trainer\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
     def _distribute_weights(self, tag: str) -> None:
         channel = self.cm.get_by_tag(tag)
@@ -189,6 +211,8 @@ class MiddleAggregator(BaseMiddleAggregator):
             channel.send(
                 end, {MessageType.WEIGHTS: self.weights, MessageType.ROUND: self._round}
             )
+
+        logger.debug("exited _distribute_weights\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
     def _aggregate_weights(self, tag: str) -> None:
         channel = self.cm.get_by_tag(tag)
@@ -240,6 +264,8 @@ class MiddleAggregator(BaseMiddleAggregator):
         self.weights = global_weights
         self.dataset_size = total
 
+        logger.debug("exited _aggregate_weights\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+
     def compose(self) -> None:
         """Compose role with tasklets."""
         with Composer() as composer:
@@ -264,7 +290,9 @@ class MiddleAggregator(BaseMiddleAggregator):
 
             task_get_fetch = Tasklet("", self.get, TAG_FETCH)
 
-            # task_release_trainers = Tasklet("", self._release_trainers)
+            task_release_trainers = Tasklet("", self._release_trainers)
+
+            task_release_top_aggs = Tasklet("", self._release_top_aggs)
 
             task_eval = Tasklet("", self.evaluate)
 
@@ -284,9 +312,10 @@ class MiddleAggregator(BaseMiddleAggregator):
                 >> task_put_dist
                 >> task_get_aggr
                 >> task_put_upload
-                # >> task_release_trainers
                 >> task_eval
                 >> task_update_round
+                >> task_release_trainers
+                >> task_release_top_aggs
             )
             >> task_end_of_training
         )

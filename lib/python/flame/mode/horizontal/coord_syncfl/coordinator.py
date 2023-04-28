@@ -65,7 +65,8 @@ class Coordinator(Role):
 
     def await_mid_aggs_and_trainers(self):
         """Wait for middle aggregators and trainers to join."""
-        logger.info("waiting for mid aggs and trainers")
+        print("\n\n")
+        logger.info(f"Round [{self._round}] starts || waiting for mid aggs and trainers")
 
         trainer_channel = self.get_channel(TAG_COORDINATE_WITH_TRAINER)
         aggregator_channel = self.get_channel(TAG_COORDINATE_WITH_MID_AGG)
@@ -74,7 +75,7 @@ class Coordinator(Role):
         trainer_channel.set_property("round", self._round)
         aggregator_channel.set_property("round", self._round)
 
-        logger.info("both mid aggs and trainers joined")
+        logger.info("both mid aggs and trainers joined\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
     def pair_mid_aggs_and_trainers(self):
         """Pair middle aggregators with trainers."""
@@ -126,7 +127,7 @@ class Coordinator(Role):
 
             self.agg_to_trainer[agg_end].append(trainer_end)
 
-        logger.debug("finished paring mid aggs and trainers")
+        logger.debug("finished paring mid aggs and trainers\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
     def send_selected_middle_aggregators(self):
         """Send selected middle aggregator list to top aggregator."""
@@ -134,22 +135,24 @@ class Coordinator(Role):
         top_agg_channel = self.get_channel(TAG_COORDINATE_WITH_TOP_AGG)
 
         mid_aggs = list()
+        mid_agg_url_dict = dict()
         for agg, trainers in self.agg_to_trainer.items():
             if len(trainers) == 0:
-                logger.debug(f"no trainer assigned for mid agg {agg}")
+                logger.debug(f"no trainer assigned for mid agg {agg}, skipping it for the top aggregator")
                 continue
 
             mid_aggs.append(agg)
+            mid_agg_url_dict[agg] = self.mid_agg_urls[agg]
 
         msg = {
             MessageType.COORDINATED_ENDS: mid_aggs, 
             MessageType.EOT: self._work_done,
-            MessageType.MID_AGGS_URL: self.mid_agg_urls
+            MessageType.MID_AGGS_URL: mid_agg_url_dict
         }
         end = top_agg_channel.one_end()
         top_agg_channel.send(end, msg)
 
-        logger.debug("finished sending selected mid aggs to top agg")
+        logger.debug("finished sending selected mid aggs to top agg\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
     def send_selected_trainers(self):
         """Send selected trainer list to middle aggregator."""
@@ -162,7 +165,7 @@ class Coordinator(Role):
                 MessageType.EOT: self._work_done,
             }
             mid_agg_channel.send(agg, msg)
-        logger.debug("exited send_selected_trainers()")
+        logger.debug("exited send_selected_trainers()\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
     def send_selected_middle_aggregator(self):
         """Send selected middle aggregator ID to each trainer."""
@@ -176,7 +179,7 @@ class Coordinator(Role):
                 MessageType.MID_AGGS_URL: self.mid_agg_urls[agg]
             }
             trainer_channel.send(trainer, msg)
-        logger.debug("exited send_selected_middle_aggregator()")
+        logger.debug("exited send_selected_middle_aggregator()\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
     def increment_round(self) -> None:
         """Increment the round counter."""
@@ -185,7 +188,7 @@ class Coordinator(Role):
         self._round += 1
         self._work_done = self._round > self._rounds
 
-        logger.debug(f"incremented round to {self._round}")
+        logger.debug(f"incremented round to {self._round}\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
     def inform_end_of_training(self) -> None:
         """Inform the end of training."""
@@ -198,7 +201,7 @@ class Coordinator(Role):
         trainer_channel = self.get_channel(TAG_COORDINATE_WITH_TRAINER)
         trainer_channel.broadcast({MessageType.EOT: self._work_done})
 
-        logger.debug("done broadcasting end-of-training")
+        logger.debug("done broadcasting end-of-training\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
     ###
     # Functions  in the following are defined as abstraction functions in Role

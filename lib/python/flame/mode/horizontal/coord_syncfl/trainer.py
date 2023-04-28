@@ -18,7 +18,7 @@ import logging
 from abc import ABCMeta
 
 from flame.channel_manager import ChannelManager
-from flame.common.constants import DeviceType, TrainerState
+from flame.common.constants import DeviceType
 from flame.common.util import (
     MLFramework,
     delta_weights_pytorch,
@@ -47,7 +47,6 @@ class Trainer(BaseTrainer, metaclass=ABCMeta):
         """Initialize internal state for role."""
         self.cm = ChannelManager()
         self.cm(self.config)
-        # self.cm.join_all()
         self.cm.join_cp()
 
         self.registry_client = registry_provider.get(self.config.registry.sort)
@@ -84,7 +83,8 @@ class Trainer(BaseTrainer, metaclass=ABCMeta):
             self._delta_weights_fn = delta_weights_tensorflow
 
     def _get_aggregator(self):
-        logger.debug("calling _get_aggregator")
+        print("\n\n")
+        logger.debug(f"Round [{self._round}] starts || calling _get_aggregator")
         channel = self.cm.get_by_tag(TAG_COORDINATE)
         if not channel:
             logger.debug(f"channel not found with tag {TAG_COORDINATE}")
@@ -105,29 +105,29 @@ class Trainer(BaseTrainer, metaclass=ABCMeta):
 
         if MessageType.MID_AGGS_URL in msg:
             mid_agg_url = msg[MessageType.MID_AGGS_URL]
-            num_ends = len(msg[MessageType.COORDINATED_ENDS])
-            logger.info(f"trainer join {num_ends} end(s): {mid_agg_url}")
-            self.cm.join_dp({self.aggregator_id: mid_agg_url}, num_ends)
 
-        logger.debug("exited _get_aggregator")
+            if not mid_agg_url:
+                raise ValueError(f"No mid-aggregator specified by coordinator")
 
-    # def _release_aggregator(self):
-    #     logger.debug("calling _release_aggregator")
-    #     fetch_channel = self.cm.get_by_tag(TAG_FETCH)
-    #     upload_channel = self.cm.get_by_tag(TAG_UPLOAD)
+            logger.info(f"trainer joins end [{msg[MessageType.COORDINATED_ENDS]}]: {mid_agg_url}")
+            self.cm.join_dp({self.aggregator_id: mid_agg_url}, 1)
 
-        # logger.info(f"Fetch channel: {fetch_channel.name()}")
-        # logger.info(f"Upload channel: {upload_channel.name()}")
-        # logger.info(f"Clean up channel: {upload_channel.name()}")
-        # self.cm.leave(upload_channel.name())
-        # upload_channel.cleanup()
+        logger.debug("exited _get_aggregator\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
-        # for end_id, end in upload_channel._ends.items():
-        #     del upload_channel._backend._endpoints[end_id]
-        #     del end
+    def _release_aggregator(self):
+        fetch_channel = self.cm.get_by_tag(TAG_FETCH)
+        upload_channel = self.cm.get_by_tag(TAG_UPLOAD)
 
-        # del self.cm.get(upload_channel.name())
-        # del upload_channel
+        if not fetch_channel or not upload_channel:
+            raise ValueError(f"channel not found for tag {TAG_FETCH}/{TAG_UPLOAD}")
+
+        if fetch_channel.name() == upload_channel.name():
+            logger.info(f"Releasing channel [{fetch_channel.name()}]")
+        else:
+            logger.error(f"channel name not match: [{fetch_channel.name()}] and [{upload_channel.name()}]")
+        self.cm.leave(upload_channel.name())
+
+        logger.debug("exited _release_aggregator\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
     def _fetch_weights(self, tag: str) -> None:
         logger.debug("calling _fetch_weights")
@@ -155,6 +155,7 @@ class Trainer(BaseTrainer, metaclass=ABCMeta):
             self._round = msg[MessageType.ROUND]
 
         logger.debug(f"work_done: {self._work_done}, round: {self._round}")
+        logger.debug("exited _fetch_weights\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
     def _send_weights(self, tag: str) -> None:
         logger.debug("calling _send_weights")
@@ -178,6 +179,8 @@ class Trainer(BaseTrainer, metaclass=ABCMeta):
         channel.send(self.aggregator_id, msg)
         logger.debug("sending weights done")
 
+        logger.debug("exited _send_weights\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+
     def compose(self) -> None:
         with Composer() as composer:
             self.composer = composer
@@ -198,7 +201,7 @@ class Trainer(BaseTrainer, metaclass=ABCMeta):
 
             task_put = Tasklet("", self.put, TAG_UPLOAD)
 
-            # task_release = Tasklet("", self._release_aggregator)
+            task_release = Tasklet("", self._release_aggregator)
 
             task_save_metrics = Tasklet("", self.save_metrics)
 
@@ -214,8 +217,8 @@ class Trainer(BaseTrainer, metaclass=ABCMeta):
                     >> task_train
                     >> task_eval
                     >> task_put
-                    # >> task_release
                     >> task_save_metrics
+                    >> task_release
                 )
             )
 

@@ -518,9 +518,9 @@ class Channel(object):
         # it's okay to call set() without checking its condition
         self.await_join_event.set()
 
-        if len(self._ends) == self.num_ends or not self.await_ends_join_event.is_set():
+        if len(self._ends) == self.num_ends and not self.await_ends_join_event.is_set():
             # set the event true
-            self.await_ends_join_event.set()    
+            self.await_ends_join_event.set()
 
     async def remove(self, end_id):
         """Remove an end from the channel."""
@@ -528,10 +528,12 @@ class Channel(object):
             return
 
         rxq = self._ends[end_id].get_rxq()
+        txq = self._ends[end_id].get_txq()
         del self._ends[end_id]
 
         # put bogus data to unblock a get() call
         await rxq.put(EMPTY_PAYLOAD)
+        await txq.put(EMPTY_PAYLOAD)
 
         if len(self._ends) == 0:
             # clear (or unset) the event
