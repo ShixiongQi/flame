@@ -38,7 +38,7 @@ setup(
         "diskcache",
         "mlflow==2.0.1",
         "paho-mqtt",
-        "protobuf==3.20.3",
+        "protobuf",
         "grpcio==1.51.1",
         "pydantic",
         "gpustat",

@@ -122,6 +122,14 @@ class TopAggregator(Role, metaclass=ABCMeta):
         if tag == TAG_AGGREGATE:
             self._aggregate_weights(tag)
 
+    def audit_weight_size(self, weights):
+        total_size = 0
+        for k, w in weights.items():
+            total_elements = w.numel()
+            element_size = w.element_size()
+            total_size += total_elements * element_size
+        print(f"total weights size: {total_size / 1024 / 1024} MB")
+
     def _aggregate_weights(self, tag: str) -> None:
         channel = self.cm.get_by_tag(tag)
         if not channel:
@@ -135,12 +143,15 @@ class TopAggregator(Role, metaclass=ABCMeta):
             if not msg:
                 logger.debug(f"No data from {end}; skipping it")
                 continue
+            delay = time.time() - timestamp.timestamp()
+            print(f"Networking delay: {delay} second")
 
             logger.debug(f"received data from {end}")
             channel.set_end_property(end, PROP_ROUND_END_TIME, (round, timestamp))
 
             if MessageType.WEIGHTS in msg:
                 weights = weights_to_model_device(msg[MessageType.WEIGHTS], self.model)
+                self.audit_weight_size(weights)
 
             if MessageType.DATASET_SIZE in msg:
                 count = msg[MessageType.DATASET_SIZE]
