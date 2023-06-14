@@ -17,6 +17,7 @@
 
 import logging
 import time
+import psutil
 from copy import deepcopy
 from datetime import datetime
 
@@ -137,21 +138,23 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
         total = 0
 
+        process = psutil.Process()
+        start_cpu_time = process.cpu_times()
         # receive local model parameters from trainers
         for msg, metadata in channel.recv_fifo(channel.ends()):
             end, timestamp = metadata
             if not msg:
                 logger.debug(f"No data from {end}; skipping it")
                 continue
-            delay = time.time() - timestamp.timestamp()
-            print(f"Networking delay: {delay} second")
+            # delay = time.time() - timestamp.timestamp()
+            # print(f"Networking delay: {delay} second")
 
             logger.debug(f"received data from {end}")
             channel.set_end_property(end, PROP_ROUND_END_TIME, (round, timestamp))
 
             if MessageType.WEIGHTS in msg:
                 weights = weights_to_model_device(msg[MessageType.WEIGHTS], self.model)
-                self.audit_weight_size(weights)
+                # self.audit_weight_size(weights)
 
             if MessageType.DATASET_SIZE in msg:
                 count = msg[MessageType.DATASET_SIZE]
@@ -170,6 +173,13 @@ class TopAggregator(Role, metaclass=ABCMeta):
                 tres = TrainResult(weights, count)
                 # save training result from trainer in a disk cache
                 self.cache[end] = tres
+
+            delay = time.time() - timestamp.timestamp()
+            end_cpu_time = process.cpu_times()
+            cpu_usage = sum(end_cpu_time) - sum(start_cpu_time)
+
+            print(f"Queuing delay: {delay} second")
+            print(f"CPU usage: {cpu_usage}")
 
         logger.debug(f"received {len(self.cache)} trainer updates in cache")
 
