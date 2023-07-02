@@ -18,6 +18,7 @@
 import logging
 import time
 import psutil
+import torch
 from copy import deepcopy
 from datetime import datetime
 
@@ -131,6 +132,18 @@ class TopAggregator(Role, metaclass=ABCMeta):
             total_size += total_elements * element_size
         print(f"total weights size: {total_size / 1024 / 1024} MB")
 
+    def add_gaussian_noise_to_weight(self, weights):
+        noise_std = 0.1  # Standard deviation of the Gaussian noise
+        noise_mean = 0
+        for k, tensor in weights.items():
+            # Generate Gaussian noise with the same shape as the tensor
+            noise = torch.randn(tensor.shape) * noise_std + noise_mean
+
+            # Add the noise to the tensor
+            noisy_tensor = tensor + noise
+
+            weights[k] = noisy_tensor
+
     def _aggregate_weights(self, tag: str) -> None:
         channel = self.cm.get_by_tag(tag)
         if not channel:
@@ -168,11 +181,21 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
             logger.debug(f"{end}'s parameters trained with {count} samples")
 
-            if weights is not None and count > 0:
+            num_duplication = 1000
+            for i in range(0, num_duplication):
+                tmp_weights = deepcopy(self.weights)
+                self.add_gaussian_noise_to_weight(tmp_weights)
+                if tmp_weights is not None and count > 0:
+                    total += count
+                    tres = TrainResult(tmp_weights, count)
+                    # save training result from trainer in a disk cache
+                    self.cache[str(i)] = tres
+
+            """if weights is not None and count > 0:
                 total += count
                 tres = TrainResult(weights, count)
                 # save training result from trainer in a disk cache
-                self.cache[end] = tres
+                self.cache[end] = tres"""
 
             delay = time.time() - timestamp.timestamp()
             end_cpu_time = process.cpu_times()

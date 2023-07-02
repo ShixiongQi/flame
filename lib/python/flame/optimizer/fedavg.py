@@ -101,7 +101,7 @@ class FedAvg(AbstractOptimizer):
             # TODO: this may need to be revisited
             tmp = tmp.to(dtype=v.dtype) if tmp.dtype != v.dtype else tmp
 
-            self.agg_weights[k] += tmp
+            self.agg_weights[k] += tmp.to(dtype=self.agg_weights[k].dtype)
 
     def _aggregate_tensorflow(self, tres, rate):
         logger.debug("calling _aggregate_tensorflow")

@@ -83,7 +83,9 @@ class PyTorchMnistAggregator(TopAggregator):
 
     def load_data(self) -> None:
         """Load a test dataset."""
-        transform = transforms.Compose([
+        pass
+
+        '''transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.1307, ), (0.3081, ))
         ])
@@ -96,7 +98,7 @@ class PyTorchMnistAggregator(TopAggregator):
         self.test_loader = torch.utils.data.DataLoader(dataset)
 
         # store data into dataset for analysis (e.g., bias)
-        self.dataset = Dataset(dataloader=self.test_loader)
+        self.dataset = Dataset(dataloader=self.test_loader)'''
 
     def train(self) -> None:
         """Train a model."""
@@ -105,7 +107,9 @@ class PyTorchMnistAggregator(TopAggregator):
 
     def evaluate(self) -> None:
         """Evaluate (test) a model."""
-        self.model.eval()
+        pass
+
+        '''self.model.eval()
         test_loss = 0
         correct = 0
         with torch.no_grad():
@@ -132,7 +136,7 @@ class PyTorchMnistAggregator(TopAggregator):
         self.update_metrics({
             'test-loss': test_loss,
             'test-accuracy': test_accuray
-        })
+        })'''
 
 
 if __name__ == "__main__":
