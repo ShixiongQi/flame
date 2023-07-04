@@ -183,7 +183,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
             num_duplication = 1000
             for i in range(0, num_duplication):
-                tmp_weights = deepcopy(self.weights)
+                tmp_weights = deepcopy(weights)
                 self.add_gaussian_noise_to_weight(tmp_weights)
                 if tmp_weights is not None and count > 0:
                     total += count
