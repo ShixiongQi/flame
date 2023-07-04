@@ -40,7 +40,7 @@ setup(
         "paho-mqtt",
         "protobuf",
         "grpcio==1.51.1",
-        "pydantic",
+        "pydantic==1.10.5",
         "gpustat",
         "psutil",
         "numpy",
