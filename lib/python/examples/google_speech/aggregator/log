@@ -1,0 +1,4 @@
+2023-07-06 19:33:18,962 | __init__.py:58 | WARNING | MainThread | __init__ | /etc/flame/plugin not found; stop plugin registration.
+2023-07-06 19:33:18,963 | channel_manager.py:72 | INFO | MainThread | __new__ | creating a ChannelManager instance
+2023-07-06 19:33:18,968 | p2p.py:155 | INFO | Thread-3 | _setup_server | serving on 128.105.145.234:41941
+2023-07-06 19:33:18,968 | channel_manager.py:146 | INFO | MainThread | join | no backend found for channel param-channel; use default

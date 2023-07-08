@@ -15,6 +15,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """horizontal FL top level aggregator."""
 
+import tempfile
 import logging
 import time
 import psutil
@@ -50,7 +51,7 @@ TAG_DISTRIBUTE = "distribute"
 TAG_AGGREGATE = "aggregate"
 PROP_ROUND_START_TIME = "round_start_time"
 PROP_ROUND_END_TIME = "round_end_time"
-
+custom_temp_dir = "/mydata/tmp"
 
 class TopAggregator(Role, metaclass=ABCMeta):
     """Top level Aggregator implements an ML aggregation role."""
@@ -95,7 +96,8 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
         # disk cache is used for saving memory in case model is large
         # automatic eviction of disk cache is disabled with cull_limit 0
-        self.cache = Cache()
+        temp_dir = tempfile.TemporaryDirectory(dir=custom_temp_dir)
+        self.cache = Cache(directory=temp_dir.name)
         self.cache.reset("size_limit", 1e15)
         self.cache.reset("cull_limit", 0)
 
@@ -151,8 +153,8 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
         total = 0
 
-        process = psutil.Process()
-        start_cpu_time = process.cpu_times()
+        # process = psutil.Process()
+        start_cpu_time = psutil.cpu_times() #process.cpu_times()
         # receive local model parameters from trainers
         for msg, metadata in channel.recv_fifo(channel.ends()):
             end, timestamp = metadata
@@ -167,7 +169,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
             if MessageType.WEIGHTS in msg:
                 weights = weights_to_model_device(msg[MessageType.WEIGHTS], self.model)
-                # self.audit_weight_size(weights)
+                self.audit_weight_size(weights)
 
             if MessageType.DATASET_SIZE in msg:
                 count = msg[MessageType.DATASET_SIZE]
@@ -181,7 +183,8 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
             logger.debug(f"{end}'s parameters trained with {count} samples")
 
-            num_duplication = 1000
+            start_duplication_cpu_time = psutil.cpu_times() # process.cpu_times()
+            num_duplication = 1
             for i in range(0, num_duplication):
                 tmp_weights = deepcopy(weights)
                 self.add_gaussian_noise_to_weight(tmp_weights)
@@ -190,6 +193,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
                     tres = TrainResult(tmp_weights, count)
                     # save training result from trainer in a disk cache
                     self.cache[str(i)] = tres
+            end_duplication_cpu_time = psutil.cpu_times() # process.cpu_times()
 
             """if weights is not None and count > 0:
                 total += count
@@ -197,12 +201,12 @@ class TopAggregator(Role, metaclass=ABCMeta):
                 # save training result from trainer in a disk cache
                 self.cache[end] = tres"""
 
-            delay = time.time() - timestamp.timestamp()
-            end_cpu_time = process.cpu_times()
-            cpu_usage = sum(end_cpu_time) - sum(start_cpu_time)
+            # delay = time.time() - timestamp.timestamp()
+            # end_cpu_time = process.cpu_times()
+            # cpu_usage = sum(end_cpu_time) - sum(start_cpu_time) - (sum(end_duplication_cpu_time) - sum(start_duplication_cpu_time))
 
-            print(f"Queuing delay: {delay} second")
-            print(f"CPU usage: {cpu_usage}")
+            # print(f"Queuing delay: {delay} second")
+            # print(f"CPU usage: {cpu_usage}")
 
         logger.debug(f"received {len(self.cache)} trainer updates in cache")
 
@@ -223,6 +227,15 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
         # update model with global weights
         self._update_model()
+
+        end_cpu_time = psutil.cpu_times() # process.cpu_times()
+        cpu_time = sum(end_cpu_time) - sum(start_cpu_time) - (sum(end_duplication_cpu_time) - sum(start_duplication_cpu_time))
+        # cpu_usage = sum(end_cpu_time) - sum(start_cpu_time)
+        idle_time_diff = end_cpu_time.idle - start_cpu_time.idle - (end_duplication_cpu_time.idle - start_duplication_cpu_time.idle)
+        utilization = 100.0 * (1.0 - idle_time_diff / cpu_time) * psutil.cpu_count(logical=True)
+
+        print(f"CPU utilization: {utilization}")
+        print(f"CPU time: {cpu_time}")
 
     def put(self, tag: str) -> None:
         """Set data to remote role(s)."""
