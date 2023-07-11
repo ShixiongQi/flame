@@ -34,6 +34,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import torch.utils.model_zoo as model_zoo
 from torch import Tensor, nn
+from torch.autograd import Variable
 
 import numba
 import os
@@ -260,6 +261,81 @@ def resnet152(pretrained=False, **kwargs):
         model.load_state_dict(model_zoo.load_url(model_urls['resnet152']))
     return model
 
+def accuracy(output, target, topk=(1,)):
+    """Computes the accuracy over the k top predictions for the specified values of k"""
+    with torch.no_grad():
+        maxk = max(topk)
+
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.t()
+        correct = pred.eq(target.reshape(1, -1).expand_as(pred))
+
+        res = []
+        for k in topk:
+            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
+            res.append(correct_k)
+
+        return res
+
+def test_pytorch_model(model, test_data, device='cpu'):
+
+    test_loss = 0
+    correct = 0
+    top_5 = 0
+
+    correct2 = 0
+    test_len = 0
+    perplexity_loss = 0.
+
+    total_cer, total_wer, num_tokens, num_chars = 0, 0, 0, 0
+
+    model = model.to(device=device)  # load by pickle
+    model.eval()
+    targets_list = []
+    preds = []
+
+    decoder = None
+
+    with torch.no_grad():
+        for data, target in test_data:
+            try:
+                data, target = Variable(data).to(device=device), Variable(target).to(device=device)
+                data = torch.unsqueeze(data, 1)
+
+                output = model(data)
+                loss = nn.NLLLoss(output, target)
+
+                test_loss += loss.data.item()  # Variable.data
+                acc = accuracy(output, target, topk=(1, 5))
+
+                correct += acc[0].item()
+                top_5 += acc[1].item()
+
+            except Exception as ex:
+                logging.info(f"Testing of failed as {ex}")
+                break
+            test_len += len(target)
+
+    test_len = max(test_len, 1)
+    # loss function averages over batch size
+    test_loss /= len(test_data)
+    perplexity_loss /= len(test_data)
+
+    sum_loss = test_loss * test_len
+
+    # in NLP, we care about the perplexity of the model
+    acc = round(correct / test_len, 4)
+    acc_5 = round(top_5 / test_len, 4)
+    test_loss = round(test_loss, 4)
+
+    logging.info('Test set: Average loss: {}, Top-1 Accuracy: {}/{} ({}), Top-5 Accuracy: {}'
+                 .format(test_loss, correct, len(test_data.dataset), acc, acc_5))
+
+    testRes = {'top_1': correct, 'top_5': top_5,
+               'test_loss': sum_loss, 'test_len': test_len}
+
+    return test_loss, acc, acc_5, testRes
+
 class PyTorchGoogleSpeechAggregator(TopAggregator):
     """PyTorch Google Speech Aggregator."""
 
@@ -276,19 +352,19 @@ class PyTorchGoogleSpeechAggregator(TopAggregator):
         self.batch_size = self.config.hyperparameters.batch_size or 16
         self.num_loaders = 4 #https://github.com/SymbioticLab/FedScale/blob/ca1cdcb79cd3d5f48e4f781f91543bfe645a5541/benchmark/configs/speech/google_speech.yml#L57
         self.num_participants = 4
-        self.data_map_file = '/mydata/FedScale/benchmark/dataset/data/google_speech/client_data_mapping/train.csv'
+        self.data_map_file = '/root/FedScale/benchmark/dataset/data/google_speech/client_data_mapping/train.csv'
         self.test_ratio = 1.0
         self.num_class = 35
         self.num_executors = 2
         self.client_id = 1
-        self.data_dir = "/mydata/FedScale/benchmark/dataset/data/google_speech/"
+        self.data_dir = "/root/FedScale/benchmark/dataset/data/google_speech/"
 
     def initialize(self):
         """Initialize role."""
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu")
 
-        self.model = resnet34(num_classes=35, in_channels=1)
+        self.model = resnet18(num_classes=35, in_channels=1).to("cuda")
 
     def load_data(self) -> None:
         """Load a test dataset."""
@@ -336,14 +412,15 @@ class PyTorchGoogleSpeechAggregator(TopAggregator):
 
     def evaluate(self) -> None:
         """Evaluate (test) a model."""
-
-        # pass
+        test_pytorch_model(self.model, self.test_loader, device='cuda')
+        #pass
+        '''
         self.model.eval()
         test_loss = 0
         correct = 0
         with torch.no_grad():
             for data, target in self.test_loader:
-                data = data.unsqueeze(1)
+                data = data.unsqueeze(1).to("cuda")
                 data, target = data.to(self.device), target.to(self.device)
                 output = self.model(data)
                 test_loss += F.nll_loss(
@@ -366,7 +443,7 @@ class PyTorchGoogleSpeechAggregator(TopAggregator):
         self.update_metrics({
             'test-loss': test_loss,
             'test-accuracy': test_accuray
-        })
+        })'''
 
 
 if __name__ == "__main__":

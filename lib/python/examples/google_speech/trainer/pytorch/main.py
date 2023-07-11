@@ -276,19 +276,26 @@ class PyTorchGoogleSpeechTrainer(Trainer):
         self.batch_size = self.config.hyperparameters.batch_size or 16
         self.num_loaders = 4 #https://github.com/SymbioticLab/FedScale/blob/ca1cdcb79cd3d5f48e4f781f91543bfe645a5541/benchmark/configs/speech/google_speech.yml#L57
         self.num_participants = 4
-        self.data_map_file = '/mydata/FedScale/benchmark/dataset/data/google_speech/client_data_mapping/train.csv'
+        self.data_map_file = '/root/FedScale/benchmark/dataset/data/google_speech/client_data_mapping/train.csv'
         self.test_ratio = 1.0
         self.num_class = 35
         self.num_executors = 2
         self.client_id = 1
-        self.data_dir = "/mydata/FedScale/benchmark/dataset/data/google_speech"
+        self.data_dir = "/root/FedScale/benchmark/dataset/data/google_speech"
+
+        self.loss_squared = 0
+        self.completed_steps = 0
+        self.epoch_train_loss = 1e-4
+        self.loss_decay = 0.2
+        self.local_steps = 30
 
     def initialize(self) -> None:
         """Initialize role."""
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu")
+        print(f" torch.cuda.is_available(): {torch.cuda.is_available()}")
 
-        self.model = resnet34(num_classes=35, in_channels=1)
+        self.model = resnet18(num_classes=35, in_channels=1).to("cuda")
 
     def load_data(self) -> None:
         """Load data."""
@@ -354,13 +361,42 @@ class PyTorchGoogleSpeechTrainer(Trainer):
         self.dataset_size = len(self.train_loader.dataset)
 
     def _train_epoch(self, epoch):
-        logger.info(f"_train_epoch: {len(self.train_loader)}")
+        # logger.info(f"_train_epoch: {len(self.train_loader)}")
         self.model.train()
 
         for batch_idx, (data, target) in enumerate(self.train_loader):
             data = data.unsqueeze(1)
-            # print(data.shape)
             data, target = data.to(self.device), target.to(self.device)
+            output = self.model(data)
+            criterion = torch.nn.CrossEntropyLoss(reduction='none').to(device=self.device)
+            loss = criterion(output, target)
+
+            loss_list = loss.tolist()
+            loss = loss.mean()
+
+            temp_loss = sum(loss_list) / float(len(loss_list))
+            self.loss_squared = sum([l ** 2 for l in loss_list]) / float(len(loss_list))
+
+            # only measure the loss of the first epoch
+            if self.completed_steps < len(self.train_loader):
+                if self.epoch_train_loss == 1e-4:
+                    self.epoch_train_loss = temp_loss
+                else:
+                    self.epoch_train_loss = (1. - self.loss_decay) * self.epoch_train_loss + self.loss_decay * temp_loss
+
+            # Define the backward loss
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
+            # Weight handler 
+            # self.optimizer.update_client_weight(conf, model, self.global_model if self.global_model is not None else None)
+
+            self.completed_steps += 1
+
+            if self.completed_steps == self.local_steps:
+                break
+            '''
             self.optimizer.zero_grad()
             output = self.model(data)
             loss = F.nll_loss(output, target)
@@ -372,6 +408,8 @@ class PyTorchGoogleSpeechTrainer(Trainer):
                 percent = 100. * batch_idx / len(self.train_loader)
                 logger.info(f"epoch: {epoch} [{done}/{total} ({percent:.0f}%)]"
                             f"\tloss: {loss.item():.6f}")
+            '''
+        logger.info(f"loss: {loss.item():.6f} \t moving_loss: {self.epoch_train_loss}")
 
     def evaluate(self) -> None:
         """Evaluate a model."""
