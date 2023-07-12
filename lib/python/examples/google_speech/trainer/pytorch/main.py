@@ -293,7 +293,7 @@ class PyTorchGoogleSpeechTrainer(Trainer):
             "cuda" if torch.cuda.is_available() else "cpu")
         print(f" torch.cuda.is_available(): {torch.cuda.is_available()}")
 
-        self.model = resnet18(num_classes=35, in_channels=1)
+        self.model = resnet18(num_classes=35, in_channels=1).to(self.device)
 
     def load_data(self) -> None:
         """Load data."""
