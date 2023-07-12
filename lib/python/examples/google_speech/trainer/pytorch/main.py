@@ -35,22 +35,20 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 import torch.utils.model_zoo as model_zoo
 from torch import Tensor, nn
 
-import numba
 import os
-from flame.utils.speech import SPEECH, BackgroundNoiseDataset
-from flame.utils.transforms_stft import (AddBackgroundNoiseOnSTFT,
+from flame.fedscale_utils.speech import SPEECH, BackgroundNoiseDataset
+from flame.fedscale_utils.transforms_stft import (AddBackgroundNoiseOnSTFT,
                                                     DeleteSTFT,
                                                     FixSTFTDimension,
                                                     StretchAudioOnSTFT,
                                                     TimeshiftAudioOnSTFT,
                                                     ToMelSpectrogramFromSTFT,
                                                     ToSTFT)
-from flame.utils.transforms_wav import (ChangeAmplitude,
+from flame.fedscale_utils.transforms_wav import (ChangeAmplitude,
                                                     ChangeSpeedAndPitchAudio,
                                                     FixAudioLength, LoadAudio,
                                                     ToMelSpectrogram,
                                                     ToTensor)
-from flame.utils.divide_data import DataPartitioner, select_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -276,12 +274,12 @@ class PyTorchGoogleSpeechTrainer(Trainer):
         self.batch_size = self.config.hyperparameters.batch_size or 16
         self.num_loaders = 4 #https://github.com/SymbioticLab/FedScale/blob/ca1cdcb79cd3d5f48e4f781f91543bfe645a5541/benchmark/configs/speech/google_speech.yml#L57
         self.num_participants = 4
-        self.data_map_file = '/root/FedScale/benchmark/dataset/data/google_speech/client_data_mapping/train.csv'
+        self.data_map_file = '/mydata/FedScale/benchmark/dataset/data/google_speech/client_data_mapping/train.csv'
         self.test_ratio = 1.0
         self.num_class = 35
         self.num_executors = 2
         self.client_id = 1
-        self.data_dir = "/root/FedScale/benchmark/dataset/data/google_speech"
+        self.data_dir = "/mydata/FedScale/benchmark/dataset/data/google_speech"
 
         self.loss_squared = 0
         self.completed_steps = 0
@@ -295,7 +293,7 @@ class PyTorchGoogleSpeechTrainer(Trainer):
             "cuda" if torch.cuda.is_available() else "cpu")
         print(f" torch.cuda.is_available(): {torch.cuda.is_available()}")
 
-        self.model = resnet18(num_classes=35, in_channels=1).to("cuda")
+        self.model = resnet18(num_classes=35, in_channels=1)
 
     def load_data(self) -> None:
         """Load data."""
@@ -320,36 +318,6 @@ class PyTorchGoogleSpeechTrainer(Trainer):
 
         self.train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size)
 
-        # logger.info("Data partitioner starts ...")
-
-        # training_sets = DataPartitioner(
-        #     data=train_dataset, test_ratio=self.test_ratio, numOfClass=self.num_class)
-        # training_sets.partition_data_helper(
-        #     num_clients=self.num_participants, data_map_file=self.data_map_file)
-
-        # logger.info("Data partitioner completes ...")
-
-        # self.train_loader = select_dataset(self.client_id, training_sets,
-        #                    self.batch_size, self.num_loaders)
-
-        """transform = transforms.Compose([
-            transforms.Grayscale(num_output_channels=1),
-            transforms.ToTensor(),
-            transforms.Normalize((0.1307, ), (0.3081, ))
-        ])
-
-        dataset = datasets.MNIST('./data',
-                                 train=True,
-                                 download=True,
-                                 transform=transform)
-
-        indices = torch.arange(2000)
-        dataset = data_utils.Subset(dataset, indices)
-        train_kwargs = {'batch_size': self.batch_size}
-
-        self.train_loader = torch.utils.data.DataLoader(
-            dataset, **train_kwargs)"""
-
     def train(self) -> None:
         """Train a model."""
         self.optimizer = optim.Adadelta(self.model.parameters())
@@ -361,7 +329,6 @@ class PyTorchGoogleSpeechTrainer(Trainer):
         self.dataset_size = len(self.train_loader.dataset)
 
     def _train_epoch(self, epoch):
-        # logger.info(f"_train_epoch: {len(self.train_loader)}")
         self.model.train()
 
         for batch_idx, (data, target) in enumerate(self.train_loader):
@@ -396,19 +363,7 @@ class PyTorchGoogleSpeechTrainer(Trainer):
 
             if self.completed_steps == self.local_steps:
                 break
-            '''
-            self.optimizer.zero_grad()
-            output = self.model(data)
-            loss = F.nll_loss(output, target)
-            loss.backward()
-            self.optimizer.step()
-            if batch_idx % 10 == 0:
-                done = batch_idx * len(data)
-                total = len(self.train_loader.dataset)
-                percent = 100. * batch_idx / len(self.train_loader)
-                logger.info(f"epoch: {epoch} [{done}/{total} ({percent:.0f}%)]"
-                            f"\tloss: {loss.item():.6f}")
-            '''
+
         logger.info(f"loss: {loss.item():.6f} \t moving_loss: {self.epoch_train_loss}")
 
     def evaluate(self) -> None:
