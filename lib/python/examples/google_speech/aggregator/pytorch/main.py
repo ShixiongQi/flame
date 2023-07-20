@@ -333,12 +333,7 @@ class PyTorchGoogleSpeechAggregator(TopAggregator):
 
         self.epochs = self.config.hyperparameters.epochs
         self.batch_size = self.config.hyperparameters.batch_size or 16
-        self.num_loaders = 4 #https://github.com/SymbioticLab/FedScale/blob/ca1cdcb79cd3d5f48e4f781f91543bfe645a5541/benchmark/configs/speech/google_speech.yml#L57
-        self.num_participants = 4
-        self.data_map_file = '/mydata/FedScale/benchmark/dataset/data/google_speech/client_data_mapping/train.csv'
-        self.test_ratio = 1.0
         self.num_class = 35
-        self.num_executors = 2
         self.client_id = 1
         self.data_dir = "/mydata/FedScale/benchmark/dataset/data/google_speech/"
 
