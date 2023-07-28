@@ -45,6 +45,8 @@ setup(
         "psutil",
         "numpy",
         "pathlib",
+        "transformers",
+        "sentencepiece",
     ],
     extras_require={
         "dev": ["pre-commit", "black", "flake8", "bandit", "mypy", "isort",],
