@@ -44,7 +44,6 @@ from flame.fedscale_utils.nlp import load_and_cache_examples, mask_tokens
 
 logger = logging.getLogger(__name__)
 
-# tokenizer = None
 tokenizer = AlbertTokenizer.from_pretrained('albert-base-v2', do_lower_case=True)
 
 def collate(examples):
@@ -81,17 +80,18 @@ class PyTorchNextWordPredictionTrainer(Trainer):
 
         self.epochs = self.config.hyperparameters.epochs
         self.batch_size = self.config.hyperparameters.batch_size or 16
-        self.data_dir = "/mydata/FedScale/benchmark/dataset/data/google_speech"
+        self.data_dir = "/mydata/FedScale/benchmark/dataset/data/reddit/"
         self.collate_fn = None
 
         self.overwrite_cache = False
-        self.block_size = 62
+        self.block_size = 64
 
         self.loss_squared = 0
         self.completed_steps = 0
         self.epoch_train_loss = 1e-4
         self.loss_decay = 0.2
         self.local_steps = 30
+        self.mlm_probability = 0.15
 
     def initialize(self) -> None:
         """Initialize role."""
@@ -107,7 +107,7 @@ class PyTorchNextWordPredictionTrainer(Trainer):
         train_dataset = init_dataset(self.data_dir, "", overwrite_cache=self.overwrite_cache, block_size=self.block_size, dataset="train")
         self.collate_fn = collate
 
-        self.train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=0)
+        self.train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size)
     
     def train(self) -> None:
         """Train a model."""
@@ -122,8 +122,8 @@ class PyTorchNextWordPredictionTrainer(Trainer):
     def _train_epoch(self, epoch):
         self.model.train()
 
-        for batch_idx, (data, _) in enumerate(self.train_loader):
-            data, target = mask_tokens(data, tokenizer, conf, device=self.device)
+        for batch_idx, data in enumerate(self.train_loader):
+            data, target = mask_tokens(data, tokenizer, mlm_probability, device=self.device)
 
             data = Variable(data).to(device=self.device)
             target = Variable(target).to(device=self.device)

@@ -39,7 +39,6 @@ from flame.fedscale_utils.nlp import load_and_cache_examples, mask_tokens
 
 logger = logging.getLogger(__name__)
 
-# tokenizer = None
 tokenizer = AlbertTokenizer.from_pretrained('albert-base-v2', do_lower_case=True)
 
 def collate(examples):
@@ -92,7 +91,7 @@ def test_pytorch_model(model, test_data, device='cpu'):
     model.eval()
 
     with torch.no_grad():
-        for data, target in test_data:
+        for data in test_data:
             try:
                 # if parser.args.mlm else (data, data)
                 data, target = mask_tokens(
@@ -154,7 +153,7 @@ class PyTorchNextWordPredictionAggregator(TopAggregator):
         self.collate_fn = None
 
         self.overwrite_cache = False
-        self.block_size = 62
+        self.block_size = 64
 
     def initialize(self):
         """Initialize role."""
@@ -170,8 +169,7 @@ class PyTorchNextWordPredictionAggregator(TopAggregator):
         test_dataset = init_dataset(self.data_dir, "", overwrite_cache=self.overwrite_cache, block_size=self.block_size, dataset="test")
         self.collate_fn = collate
 
-        self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=0)
-    
+        self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=20)
 
     def train(self) -> None:
         """Train a model."""
