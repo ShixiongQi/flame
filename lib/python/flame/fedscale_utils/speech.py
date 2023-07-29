@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import logging
 import csv
 import os
 import warnings
@@ -11,6 +12,7 @@ import numpy as np
 CLASSES = ['up', 'two', 'sheila', 'zero', 'yes', 'five', 'one', 'happy', 'marvin', 'no', 'go', 'seven', 'eight', 'tree', 'stop', 'down', 'forward',
            'learn', 'house', 'three', 'six', 'backward', 'dog', 'cat', 'wow', 'left', 'off', 'on', 'four', 'visual', 'nine', 'bird', 'right', 'follow', 'bed']
 
+logger = logging.getLogger(__name__)
 
 class SPEECH():
     """
@@ -50,11 +52,13 @@ class SPEECH():
         warnings.warn("test_data has been renamed data")
         return self.data
 
-    def __init__(self, root, dataset='train', transform=None, target_transform=None, classes=CLASSES):
+    def __init__(self, root, meta_dir, partition_id, dataset='train', transform=None, target_transform=None, classes=CLASSES):
 
         self.root = root
         self.transform = transform
         self.target_transform = target_transform
+        self.meta_dir = meta_dir
+        self.partition_id = partition_id
 
         self.classMapping = {classes[i]: i for i in range(len(classes))}
         self.data_file = dataset  # 'train', 'test', 'validation'
@@ -114,9 +118,12 @@ class SPEECH():
 
     def load_file(self, path):
         rawData, rawTags = [], []
+
+        csv_path = os.path.join(self.meta_dir, self.data_file, 'client-'+str(self.partition_id)+'-'+self.data_file+'.csv')
+        logger.info(f"Loading CSV file from {csv_path}")
+
         # load meta file to get labels
-        classMapping = self.load_meta_data(os.path.join(
-            self.processed_folder, 'client_data_mapping', self.data_file+'.csv'))
+        classMapping = self.load_meta_data(csv_path)
 
         for imgFile in list(classMapping.keys()):
             rawData.append(imgFile)

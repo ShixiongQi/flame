@@ -47,6 +47,8 @@ setup(
         "pathlib",
         "transformers",
         "sentencepiece",
+        "gdown",
+        "librosa",
     ],
     extras_require={
         "dev": ["pre-commit", "black", "flake8", "bandit", "mypy", "isort",],

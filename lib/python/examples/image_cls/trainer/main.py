@@ -20,6 +20,12 @@ https://github.com/pytorch/examples/blob/master/mnist/main.py.
 """
 
 import logging
+import random
+
+from flame.mode.composer import Composer
+from flame.mode.tasklet import Loop, Tasklet
+TAG_FETCH = "fetch"
+TAG_UPLOAD = "upload"
 
 import torch
 import torch.nn as nn
@@ -33,6 +39,7 @@ import torchvision.models as tormodels
 
 from flame.fedscale_utils.femnist import FEMNIST
 from flame.fedscale_utils.utils_data import get_data_transform
+from torch.autograd import Variable
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +65,8 @@ class PyTorchFemnistTrainer(Trainer):
         self.epoch_train_loss = 1e-4
         self.loss_decay = 0.2
         self.local_steps = 30
+        self.meta_dir = "/mydata/flame_dataset/femnist/"
+        self.partition_id = 1
 
     def initialize(self) -> None:
         """Initialize role."""
@@ -69,8 +78,12 @@ class PyTorchFemnistTrainer(Trainer):
     def load_data(self) -> None:
         """Load data."""
 
+        # Generate a random parition ID
+        self.partition_id = random.randint(1, 3399)
+
         train_transform, test_transform = get_data_transform('mnist')
-        train_dataset = FEMNIST(self.data_dir, dataset='train', transform=train_transform)
+        train_dataset = FEMNIST(self.data_dir, self.meta_dir, self.partition_id,
+                                dataset='train', transform=train_transform)
 
         # indices = torch.arange(2000)
         # train_dataset = data_utils.Subset(train_dataset, indices)
@@ -128,6 +141,37 @@ class PyTorchFemnistTrainer(Trainer):
         # Implement this if testing is needed in trainer
         pass
 
+    def compose(self) -> None:
+        """Compose role with tasklets."""
+        with Composer() as composer:
+            self.composer = composer
+
+            task_internal_init = Tasklet("internal_init", self.internal_init)
+
+            task_load_data = Tasklet("load_data", self.load_data)
+
+            task_init = Tasklet("init", self.initialize)
+
+            task_get = Tasklet("fetch", self.get, TAG_FETCH)
+            task_get.set_continue_fn(cont_fn=lambda: not self.fetch_success)
+
+            task_train = Tasklet("train", self.train)
+
+            task_eval = Tasklet("evaluate", self.evaluate)
+
+            task_put = Tasklet("upload", self.put, TAG_UPLOAD)
+
+            task_save_metrics = Tasklet("save_metrics", self.save_metrics)
+
+            # create a loop object with loop exit condition function
+            loop = Loop(loop_check_fn=lambda: self._work_done)
+            (
+                task_internal_init
+                >> task_init
+                >> loop(
+                    task_load_data >> task_get >> task_train >> task_eval >> task_put >> task_save_metrics
+                )
+            )
 
 if __name__ == "__main__":
     import argparse

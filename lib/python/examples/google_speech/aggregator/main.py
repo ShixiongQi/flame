@@ -13,39 +13,38 @@
 # limitations under the License.
 #
 # SPDX-License-Identifier: Apache-2.0
-"""Google Speech horizontal FL trainer for PyTorch.
+"""MNIST horizontal FL aggregator for PyTorch.
 
-Imported from https://github.com/SymbioticLab/FedScale/blob/master/fedscale/utils/models/specialized/resnet_speech.py
+The example below is implemented based on the following example from pytorch:
+https://github.com/pytorch/examples/blob/master/mnist/main.py.
 """
 
 import logging
+import random
+
+from flame.mode.composer import Composer
+from flame.mode.tasklet import Loop, Tasklet
+
+TAG_DISTRIBUTE = "distribute"
+TAG_AGGREGATE = "aggregate"
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
-import torch.utils.data as data_utils
 from flame.config import Config
-from flame.mode.horizontal.trainer import Trainer
+from flame.dataset import Dataset
+from flame.mode.horizontal.top_aggregator import TopAggregator
 from torchvision import datasets, transforms
 
 import math
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import torch.utils.model_zoo as model_zoo
 from torch import Tensor, nn
+from torch.autograd import Variable
 
-import os
-from flame.fedscale_utils.speech import SPEECH, BackgroundNoiseDataset
-from flame.fedscale_utils.transforms_stft import (AddBackgroundNoiseOnSTFT,
-                                                    DeleteSTFT,
-                                                    FixSTFTDimension,
-                                                    StretchAudioOnSTFT,
-                                                    TimeshiftAudioOnSTFT,
-                                                    ToMelSpectrogramFromSTFT,
-                                                    ToSTFT)
-from flame.fedscale_utils.transforms_wav import (ChangeAmplitude,
-                                                    ChangeSpeedAndPitchAudio,
-                                                    FixAudioLength, LoadAudio,
+from flame.fedscale_utils.speech import SPEECH
+from flame.fedscale_utils.transforms_wav import (FixAudioLength, LoadAudio,
                                                     ToMelSpectrogram,
                                                     ToTensor)
 
@@ -257,114 +256,180 @@ def resnet152(pretrained=False, **kwargs):
         model.load_state_dict(model_zoo.load_url(model_urls['resnet152']))
     return model
 
-class PyTorchGoogleSpeechTrainer(Trainer):
-    """PyTorch Google Speech Trainer."""
+def accuracy(output, target, topk=(1,)):
+    """Computes the accuracy over the k top predictions for the specified values of k"""
+    with torch.no_grad():
+        maxk = max(topk)
+
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.t()
+        correct = pred.eq(target.reshape(1, -1).expand_as(pred))
+
+        res = []
+        for k in topk:
+            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
+            res.append(correct_k)
+
+        return res
+
+def test_pytorch_model(model, test_data, device='cpu'):
+
+    test_loss = 0
+    correct = 0
+    top_5 = 0
+
+    test_len = 0
+    perplexity_loss = 0.
+
+    model = model.to(device=device)  # load by pickle
+    model.eval()
+
+    criterion = nn.NLLLoss()
+
+    with torch.no_grad():
+        for data, target in test_data:
+            try:
+                data, target = Variable(data).to(device=device), Variable(target).to(device=device)
+                data = torch.unsqueeze(data, 1)
+
+                output = model(data)
+                loss = criterion(output, target)
+
+                test_loss += loss.data.item()  # Variable.data
+                acc = accuracy(output, target, topk=(1, 5))
+
+                correct += acc[0].item()
+                top_5 += acc[1].item()
+
+            except Exception as ex:
+                logging.info(f"Testing of failed as {ex}")
+                break
+            test_len += len(target)
+
+    test_len = max(test_len, 1)
+    # loss function averages over batch size
+    test_loss /= len(test_data)
+    perplexity_loss /= len(test_data)
+
+    sum_loss = test_loss * test_len
+
+    # in NLP, we care about the perplexity of the model
+    acc = round(correct / test_len, 4)
+    acc_5 = round(top_5 / test_len, 4)
+    test_loss = round(test_loss, 4)
+
+    logging.info('Test set: Average loss: {}, Top-1 Accuracy: {}/{} ({}), Top-5 Accuracy: {}'
+                 .format(test_loss, correct, len(test_data.dataset), acc, acc_5))
+
+    testRes = {'top_1': correct, 'top_5': top_5,
+               'test_loss': sum_loss, 'test_len': test_len}
+
+    return test_loss, acc, acc_5, testRes
+
+class PyTorchGoogleSpeechAggregator(TopAggregator):
+    """PyTorch Google Speech Aggregator."""
 
     def __init__(self, config: Config) -> None:
         """Initialize a class instance."""
         self.config = config
-        self.dataset_size = 0
         self.model = None
+        self.dataset: Dataset = None
 
         self.device = None
-        self.train_loader = None
+        self.test_loader = None
 
         self.epochs = self.config.hyperparameters.epochs
         self.batch_size = self.config.hyperparameters.batch_size or 16
         self.num_class = 35
-        self.client_id = 1
-        self.data_dir = "/mydata/FedScale/benchmark/dataset/data/google_speech"
+        self.data_dir = "/mydata/FedScale/benchmark/dataset/data/google_speech/"
+        self.meta_dir = "/mydata/flame_dataset/google_speech/"
+        self.partition_id = 1
 
-        self.loss_squared = 0
-        self.completed_steps = 0
-        self.epoch_train_loss = 1e-4
-        self.loss_decay = 0.2
-        self.local_steps = 30
-
-    def initialize(self) -> None:
+    def initialize(self):
         """Initialize role."""
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu")
-        print(f" torch.cuda.is_available(): {torch.cuda.is_available()}")
 
         self.model = resnet18(num_classes=35, in_channels=1).to(self.device)
 
     def load_data(self) -> None:
-        """Load data."""
+        """Load a test dataset."""
 
-        # Loading Background Noise Dataset
-        bkg = '_background_noise_'
-        data_aug_transform = transforms.Compose(
-            [ChangeAmplitude(), ChangeSpeedAndPitchAudio(), FixAudioLength(), ToSTFT(), StretchAudioOnSTFT(),
-                TimeshiftAudioOnSTFT(), FixSTFTDimension()])
-        bg_dataset = BackgroundNoiseDataset(
-            os.path.join(self.data_dir, bkg), data_aug_transform)
-        add_bg_noise = AddBackgroundNoiseOnSTFT(bg_dataset)
+        # Generate a random parition ID
+        self.partition_id = random.randint(0, 9)
 
-        # Loading Training Speech Dataset
-        train_feature_transform = transforms.Compose([ToMelSpectrogramFromSTFT(
-            n_mels=32), DeleteSTFT(), ToTensor('mel_spectrogram', 'input')])
-        train_dataset = SPEECH(self.data_dir, dataset='train',
+        # Loading Testing Speech Dataset
+        valid_feature_transform = transforms.Compose(
+            [ToMelSpectrogram(n_mels=32), ToTensor('mel_spectrogram', 'input')])
+        test_dataset = SPEECH(self.data_dir, self.meta_dir, self.partition_id, dataset='test',
                                 transform=transforms.Compose([LoadAudio(),
-                                                            data_aug_transform,
-                                                            add_bg_noise,
-                                                            train_feature_transform])) 
+                                                            FixAudioLength(),
+                                                            valid_feature_transform]))
 
-        self.train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size)
+        self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=self.batch_size)
 
     def train(self) -> None:
         """Train a model."""
-        self.optimizer = optim.Adadelta(self.model.parameters())
-
-        for epoch in range(1, self.epochs + 1):
-            self._train_epoch(epoch)
-
-        # save dataset size so that the info can be shared with aggregator
-        self.dataset_size = len(self.train_loader.dataset)
-
-    def _train_epoch(self, epoch):
-        self.model.train()
-
-        for batch_idx, (data, target) in enumerate(self.train_loader):
-            data = data.unsqueeze(1)
-            data, target = data.to(self.device), target.to(self.device)
-            output = self.model(data)
-            criterion = torch.nn.CrossEntropyLoss(reduction='none').to(device=self.device)
-            loss = criterion(output, target)
-
-            loss_list = loss.tolist()
-            loss = loss.mean()
-
-            temp_loss = sum(loss_list) / float(len(loss_list))
-            self.loss_squared = sum([l ** 2 for l in loss_list]) / float(len(loss_list))
-
-            # only measure the loss of the first epoch
-            if self.completed_steps < len(self.train_loader):
-                if self.epoch_train_loss == 1e-4:
-                    self.epoch_train_loss = temp_loss
-                else:
-                    self.epoch_train_loss = (1. - self.loss_decay) * self.epoch_train_loss + self.loss_decay * temp_loss
-
-            # Define the backward loss
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-
-            # Weight handler 
-            # self.optimizer.update_client_weight(conf, model, self.global_model if self.global_model is not None else None)
-
-            self.completed_steps += 1
-
-            if self.completed_steps == self.local_steps:
-                break
-
-        logger.info(f"loss: {loss.item():.6f} \t moving_loss: {self.epoch_train_loss}")
-
-    def evaluate(self) -> None:
-        """Evaluate a model."""
-        # Implement this if testing is needed in trainer
+        # Implement this if testing is needed in aggregator
         pass
 
+    def evaluate(self) -> None:
+        """Evaluate (test) a model."""
+        test_pytorch_model(self.model, self.test_loader, device='cpu')
+        # pass
+
+    def compose(self) -> None:
+        """Compose role with tasklets."""
+        with Composer() as composer:
+            self.composer = composer
+
+            task_internal_init = Tasklet("internal_init", self.internal_init)
+
+            task_init = Tasklet("initialize", self.initialize)
+
+            task_load_data = Tasklet("load_data", self.load_data)
+
+            task_put = Tasklet("distribute", self.put, TAG_DISTRIBUTE)
+
+            task_get = Tasklet("aggregate", self.get, TAG_AGGREGATE)
+
+            task_train = Tasklet("train", self.train)
+
+            task_eval = Tasklet("evaluate", self.evaluate)
+
+            task_analysis = Tasklet("analysis", self.run_analysis)
+
+            task_save_metrics = Tasklet("save_metrics", self.save_metrics)
+
+            task_increment_round = Tasklet("inc_round", self.increment_round)
+
+            task_end_of_training = Tasklet(
+                "inform_end_of_training", self.inform_end_of_training
+            )
+
+            task_save_params = Tasklet("save_params", self.save_params)
+
+            task_save_model = Tasklet("save_model", self.save_model)
+
+        # create a loop object with loop exit condition function
+        loop = Loop(loop_check_fn=lambda: self._work_done)
+        (
+            task_internal_init
+            >> task_init
+            >> loop(
+                task_load_data
+                >> task_put
+                >> task_get
+                >> task_train
+                >> task_eval
+                >> task_analysis
+                >> task_save_metrics
+                >> task_increment_round
+            )
+            >> task_end_of_training
+            >> task_save_params
+            >> task_save_model
+        )
 
 if __name__ == "__main__":
     import argparse
@@ -373,8 +438,9 @@ if __name__ == "__main__":
     parser.add_argument('config', nargs='?', default="./config.json")
 
     args = parser.parse_args()
+
     config = Config(args.config)
 
-    t = PyTorchGoogleSpeechTrainer(config)
-    t.compose()
-    t.run()
+    a = PyTorchGoogleSpeechAggregator(config)
+    a.compose()
+    a.run()

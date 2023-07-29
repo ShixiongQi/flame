@@ -20,6 +20,13 @@ https://github.com/pytorch/examples/blob/master/mnist/main.py.
 """
 
 import logging
+import random
+
+from flame.mode.composer import Composer
+from flame.mode.tasklet import Loop, Tasklet
+
+TAG_DISTRIBUTE = "distribute"
+TAG_AGGREGATE = "aggregate"
 
 import torch
 import torch.nn as nn
@@ -32,6 +39,7 @@ import torchvision.models as tormodels
 
 from flame.fedscale_utils.femnist import FEMNIST
 from flame.fedscale_utils.utils_data import get_data_transform
+from torch.autograd import Variable
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +125,8 @@ class PyTorchFemnistAggregator(TopAggregator):
         self.test_loader = None
 
         self.data_dir = "/mydata/FedScale/benchmark/dataset/data/femnist/"
+        self.meta_dir = "/mydata/flame_dataset/femnist/"
+        self.partition_id = 1
 
     def initialize(self):
         """Initialize role."""
@@ -129,10 +139,14 @@ class PyTorchFemnistAggregator(TopAggregator):
     def load_data(self) -> None:
         """Load a test dataset."""
 
-        train_transform, test_transform = get_data_transform('mnist')
-        test_dataset = FEMNIST(self.data_dir, dataset='test', transform=test_transform)
+        # Generate a random parition ID
+        self.partition_id = random.randint(1, 11)
 
-        self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1,
+        train_transform, test_transform = get_data_transform('mnist')
+        test_dataset = FEMNIST(self.data_dir, self.meta_dir, self.partition_id,
+                            dataset='test', transform=test_transform)
+
+        self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=16,
                 shuffle=True, pin_memory=True, timeout=0,
                 num_workers=0, drop_last=False)
 
@@ -157,6 +171,59 @@ class PyTorchFemnistAggregator(TopAggregator):
             'test-loss': test_loss,
             'test-accuracy': test_accuray
         })
+
+    def compose(self) -> None:
+        """Compose role with tasklets."""
+        with Composer() as composer:
+            self.composer = composer
+
+            task_internal_init = Tasklet("internal_init", self.internal_init)
+
+            task_init = Tasklet("initialize", self.initialize)
+
+            task_load_data = Tasklet("load_data", self.load_data)
+
+            task_put = Tasklet("distribute", self.put, TAG_DISTRIBUTE)
+
+            task_get = Tasklet("aggregate", self.get, TAG_AGGREGATE)
+
+            task_train = Tasklet("train", self.train)
+
+            task_eval = Tasklet("evaluate", self.evaluate)
+
+            task_analysis = Tasklet("analysis", self.run_analysis)
+
+            task_save_metrics = Tasklet("save_metrics", self.save_metrics)
+
+            task_increment_round = Tasklet("inc_round", self.increment_round)
+
+            task_end_of_training = Tasklet(
+                "inform_end_of_training", self.inform_end_of_training
+            )
+
+            task_save_params = Tasklet("save_params", self.save_params)
+
+            task_save_model = Tasklet("save_model", self.save_model)
+
+        # create a loop object with loop exit condition function
+        loop = Loop(loop_check_fn=lambda: self._work_done)
+        (
+            task_internal_init
+            >> task_init
+            >> loop(
+                task_load_data
+                >> task_put
+                >> task_get
+                >> task_train
+                >> task_eval
+                >> task_analysis
+                >> task_save_metrics
+                >> task_increment_round
+            )
+            >> task_end_of_training
+            >> task_save_params
+            >> task_save_model
+        )
 
 if __name__ == "__main__":
     import argparse

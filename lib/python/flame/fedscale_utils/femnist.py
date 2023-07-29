@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import logging
 import csv
 import os
 import os.path
@@ -7,6 +8,7 @@ import warnings
 
 from PIL import Image
 
+logger = logging.getLogger(__name__)
 
 class FEMNIST():
     """
@@ -46,13 +48,15 @@ class FEMNIST():
         warnings.warn("test_data has been renamed data")
         return self.data
 
-    def __init__(self, root, dataset='train', transform=None, target_transform=None, imgview=False):
+    def __init__(self, root, meta_dir, partition_id, dataset='train', transform=None, target_transform=None, imgview=False):
 
         self.data_file = dataset  # 'train', 'test', 'validation'
         self.root = root
         self.transform = transform
         self.target_transform = target_transform
         self.path = os.path.join(self.processed_folder, self.data_file)
+        self.meta_dir = meta_dir
+        self.partition_id = partition_id
 
         # load data and targets
         self.data, self.targets = self.load_file(self.path)
@@ -119,7 +123,11 @@ class FEMNIST():
     def load_file(self, path):
 
         # load meta file to get labels
+        # datas, labels = self.load_meta_data(os.path.join(self.processed_folder, 'client_data_mapping', self.data_file+'.csv'))
+        csv_path = os.path.join(self.meta_dir, self.data_file, 'client-'+str(self.partition_id)+'-'+self.data_file+'.csv')
+        logger.info(f"Loading CSV file from {csv_path}")
+
         datas, labels = self.load_meta_data(os.path.join(
-            self.processed_folder, 'client_data_mapping', self.data_file+'.csv'))
+            self.meta_dir, self.data_file, 'client-'+str(self.partition_id)+'-'+self.data_file+'.csv'))
 
         return datas, labels
