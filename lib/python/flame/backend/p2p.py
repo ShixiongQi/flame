@@ -34,9 +34,9 @@ from flame.proto import meta_pb2, meta_pb2_grpc
 logger = logging.getLogger(__name__)
 
 ENDPOINT_TOKEN_LEN = 2
-META_SVR_HEART_BEAT_DURATION = 30  # for metaserver
+META_SVR_HEART_BEAT_DURATION = 3000  # for metaserver
 
-PEER_HEART_BEAT_PERIOD = 20  # 20 seconds
+PEER_HEART_BEAT_PERIOD = 2000  # 20 seconds
 PEER_HEART_BEAT_WAIT_TIME = 1.5 * PEER_HEART_BEAT_PERIOD
 HEART_BEAT_UPDATE_SKIP_TIME = PEER_HEART_BEAT_PERIOD / 4
 

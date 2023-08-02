@@ -13,12 +13,18 @@
 # limitations under the License.
 #
 # SPDX-License-Identifier: Apache-2.0
-"""Google Speech horizontal FL trainer for PyTorch.
+"""Next Word Prediction horizontal FL trainer for PyTorch.
 
-Imported from https://github.com/SymbioticLab/FedScale/blob/master/fedscale/utils/models/specialized/resnet_speech.py
+Model and data loader are imported from FedScale
 """
 
 import logging
+import random
+
+from flame.mode.composer import Composer
+from flame.mode.tasklet import Loop, Tasklet
+TAG_FETCH = "fetch"
+TAG_UPLOAD = "upload"
 
 import torch
 import torch.nn as nn
@@ -32,15 +38,18 @@ from torchvision import datasets, transforms
 import math
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+from torch.autograd import Variable
 import torch.utils.model_zoo as model_zoo
 from torch import Tensor, nn
 
 # libs from FedScale
 import os
+import csv
 from torch.nn.utils.rnn import pad_sequence
 from transformers import (AlbertTokenizer, AutoConfig, AutoModelWithLMHead)
 
 from flame.fedscale_utils.nlp import load_and_cache_examples, mask_tokens
+from flame.fedscale_utils.divide_data import DataPartitioner
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +75,13 @@ def init_dataset(data_dir, model, overwrite_cache, block_size, dataset="train"):
     elif dataset == "test":
         return load_and_cache_examples(data_dir, model, overwrite_cache, block_size, tokenizer, evaluate=True)
 
+def load_partition(partition_file_path):
+    with open(partition_file_path, "r") as csvfile:
+        reader = csv.reader(csvfile)
+        data_indexes = [list(map(int, row)) for row in reader][0]
+
+    return data_indexes
+
 class PyTorchNextWordPredictionTrainer(Trainer):
     """PyTorch Next Word Prediction Trainer."""
 
@@ -81,6 +97,7 @@ class PyTorchNextWordPredictionTrainer(Trainer):
         self.epochs = self.config.hyperparameters.epochs
         self.batch_size = self.config.hyperparameters.batch_size or 16
         self.data_dir = "/mydata/FedScale/benchmark/dataset/data/reddit/"
+        self.meta_dir = "/mydata/flame_dataset/reddit/"
         self.collate_fn = None
 
         self.overwrite_cache = False
@@ -93,6 +110,8 @@ class PyTorchNextWordPredictionTrainer(Trainer):
         self.local_steps = 30
         self.mlm_probability = 0.15
 
+        self.training_sets = None
+
     def initialize(self) -> None:
         """Initialize role."""
         self.device = torch.device(
@@ -100,14 +119,27 @@ class PyTorchNextWordPredictionTrainer(Trainer):
 
         self.model = init_model(self.data_dir, model="albert-base-v2").to(device=self.device)
 
+        print(f"Loading (Whole) Training Reddit Dataset from cache")
+        train_dataset = init_dataset(self.data_dir, "", overwrite_cache=self.overwrite_cache, block_size=self.block_size, dataset="train")
+        self.training_sets = DataPartitioner(data=train_dataset)
+
     def load_data(self) -> None:
         """Load data."""
 
-        # Loading Testing Reddit Dataset
-        train_dataset = init_dataset(self.data_dir, "", overwrite_cache=self.overwrite_cache, block_size=self.block_size, dataset="train")
+        # Generate a random parition ID
+        self.partition_id = random.randint(0, 130000)
+
+        partition_file_path = os.path.join(self.meta_dir, "train", 'client-'+str(self.partition_id)+'-'+'train.csv')
+        training_data_indexes = load_partition(partition_file_path)
+
+        partitioned_train_dataset = self.training_sets.use(training_data_indexes, False)
+
         self.collate_fn = collate
 
-        self.train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size)
+        self.train_loader = torch.utils.data.DataLoader(partitioned_train_dataset,
+                        batch_size=self.batch_size, shuffle=True, pin_memory=True, 
+                        timeout=0, num_workers=0, 
+                        drop_last=True, collate_fn=self.collate_fn)
     
     def train(self) -> None:
         """Train a model."""
@@ -122,7 +154,9 @@ class PyTorchNextWordPredictionTrainer(Trainer):
     def _train_epoch(self, epoch):
         self.model.train()
 
-        for batch_idx, data in enumerate(self.train_loader):
+        mlm_probability = 0.15
+
+        for batch_idx, (data, _) in enumerate(self.train_loader):
             data, target = mask_tokens(data, tokenizer, mlm_probability, device=self.device)
 
             data = Variable(data).to(device=self.device)
@@ -159,6 +193,37 @@ class PyTorchNextWordPredictionTrainer(Trainer):
         # Implement this if testing is needed in trainer
         pass
 
+    def compose(self) -> None:
+        """Compose role with tasklets."""
+        with Composer() as composer:
+            self.composer = composer
+
+            task_internal_init = Tasklet("internal_init", self.internal_init)
+
+            task_load_data = Tasklet("load_data", self.load_data)
+
+            task_init = Tasklet("init", self.initialize)
+
+            task_get = Tasklet("fetch", self.get, TAG_FETCH)
+            task_get.set_continue_fn(cont_fn=lambda: not self.fetch_success)
+
+            task_train = Tasklet("train", self.train)
+
+            task_eval = Tasklet("evaluate", self.evaluate)
+
+            task_put = Tasklet("upload", self.put, TAG_UPLOAD)
+
+            task_save_metrics = Tasklet("save_metrics", self.save_metrics)
+
+            # create a loop object with loop exit condition function
+            loop = Loop(loop_check_fn=lambda: self._work_done)
+            (
+                task_internal_init
+                >> task_init
+                >> loop(
+                    task_load_data >> task_get >> task_train >> task_eval >> task_put >> task_save_metrics
+                )
+            )
 
 if __name__ == "__main__":
     import argparse

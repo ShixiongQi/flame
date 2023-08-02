@@ -39,48 +39,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-N_JOBS = cpu_count()
 logger = logging.getLogger(__name__)
-
-
-def chunks_idx(l, n):
-    d, r = divmod(len(l), n)
-    for i in range(n):
-        si = (d+1)*(i if i < r else r) + d*(0 if i < r else i - r)
-        yield si, si+(d+1 if i < r else d)
-
-
-def feature_creation_worker(files, tokenizer, block_size, worker_idx):
-    examples = []
-    sample_client = []
-    client_mapping = collections.defaultdict(list)
-
-    user_id = -1
-    start_time = time.time()
-    for idx, file in enumerate(files):
-        try:
-            with open(file, encoding="utf-8", errors='ignore') as f:
-                text = f.read()
-
-            tokenized_text = tokenizer.convert_tokens_to_ids(
-                tokenizer.tokenize(text))
-            if len(tokenized_text) > 0:
-                user_id += 1
-
-            # Truncate in block of block_size
-            for i in range(0, len(tokenized_text) - block_size + 1, block_size):
-                examples.append(tokenizer.build_inputs_with_special_tokens(
-                    tokenized_text[i: i + block_size]))
-                client_mapping[user_id].append(len(examples)-1)
-                sample_client.append(user_id)
-        except Exception as e:
-            logging.error(f"Worker {worker_idx}: fail due to {e}")
-        if idx % 10000 == 0:
-            logging.info(f"Worker {worker_idx}: {len(files)-idx} files left, {idx} files complete, remaining time {(time.time()-start_time)/(idx+1)*(len(files)-idx)}")
-            gc.collect()
-
-    return (examples, client_mapping, sample_client)
-
 
 class TextDataset(Dataset):
     def __init__(self, tokenizer, model, overwrite_cache, file_path, block_size=512):
@@ -102,58 +61,7 @@ class TextDataset(Dataset):
                 self.client_mapping = pickle.load(handle)
             gc.enable()
         else:
-            logger.info("Creating features from dataset file at %s", directory)
-
-            self.examples = []
-            self.sample_client = []
-            self.client_mapping = collections.defaultdict(list)
-            user_id = -1
-
-            files = [entry.name for entry in os.scandir(
-                file_path) if '_cached_lm_' not in entry.name]
-            # make sure files are ordered
-            files = [os.path.join(file_path, x) for x in sorted(files)]
-
-            pool_inputs = []
-            pool = Pool(N_JOBS)
-            worker_cnt = 0
-            for begin, end in chunks_idx(range(len(files)), N_JOBS):
-                pool_inputs.append(
-                    [files[begin:end], tokenizer, block_size, worker_cnt])
-                worker_cnt += 1
-
-            pool_outputs = pool.starmap(feature_creation_worker, pool_inputs)
-            pool.close()
-            pool.join()
-
-            user_id_base = 0
-            for (examples, client_mapping, sample_client) in pool_outputs:
-                self.examples += examples
-                true_sample_client = [i + user_id_base for i in sample_client]
-                self.sample_client += true_sample_client
-                for user_id, true_user_id in zip(sample_client, true_sample_client):
-                    self.client_mapping[true_user_id] = client_mapping[user_id]
-                user_id_base = true_sample_client[-1] + 1
-
-            # Note that we are loosing the last truncated example here for the sake of simplicity (no padding)
-            # If your dataset is small, first you should look for a bigger one :-) and second you
-            # can change this behavior by adding (model specific) padding.
-            logger.info("Saving features into cached file %s",
-                        cached_features_file)
-            with open(cached_features_file, "wb") as handle:
-                pickle.dump(self.examples, handle, protocol=-1)
-                pickle.dump(self.client_mapping, handle, protocol=-1)
-                pickle.dump(self.sample_client, handle, protocol=-1)
-
-            # dump the data_mapping_file
-            results = [['client_id', 'sample_path', 'label_name', 'label_id']]
-            for i in range(len(self.sample_client)):
-                results.append([self.sample_client[i], i, -1, -1])
-
-            with open(os.path.join(file_path, '../client_data_mapping', 'result.csv'), 'w') as csvFile:
-                writer = csv.writer(csvFile)
-                for line in results:
-                    writer.writerow(line)
+            logger.info("Fail to load features from cached file")
 
         self.data = self.examples
         self.targets = [0 for i in range(len(self.data))]

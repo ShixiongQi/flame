@@ -15,7 +15,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """horizontal FL top level aggregator."""
 
-import tempfile
+import tempfile, os
 import logging
 import time
 import psutil
@@ -96,6 +96,8 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
         # disk cache is used for saving memory in case model is large
         # automatic eviction of disk cache is disabled with cull_limit 0
+        if not os.path.exists(custom_temp_dir):
+            os.makedirs(custom_temp_dir)
         temp_dir = tempfile.TemporaryDirectory(dir=custom_temp_dir)
         self.cache = Cache(directory=temp_dir.name)
         self.cache.reset("size_limit", 1e15)
