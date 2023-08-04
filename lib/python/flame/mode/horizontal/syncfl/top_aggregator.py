@@ -234,7 +234,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
             cpu_time = sum(end_cpu_time) - sum(start_cpu_time) - (sum(end_duplication_cpu_time) - sum(start_duplication_cpu_time))
             idle_time_diff = end_cpu_time.idle - start_cpu_time.idle - (end_duplication_cpu_time.idle - start_duplication_cpu_time.idle)
         else:
-            cpu_usage = sum(end_cpu_time) - sum(start_cpu_time)
+            cpu_time = sum(end_cpu_time) - sum(start_cpu_time)
             idle_time_diff = end_cpu_time.idle - start_cpu_time.idle
 
         utilization = 100.0 * (1.0 - idle_time_diff / cpu_time) * psutil.cpu_count(logical=True)
