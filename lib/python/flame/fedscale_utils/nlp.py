@@ -107,7 +107,7 @@ def mask_tokens(inputs, tokenizer, mlm_probability, device='cpu') -> Tuple[torch
     indices_random = torch.tensor(torch.bernoulli(torch.full(
         labels.shape, 0.5)), dtype=torch.bool, device=device) & masked_indices & ~indices_replaced
     random_words = torch.randint(
-        len(tokenizer), labels.shape, dtype=torch.long)
+        len(tokenizer), labels.shape, dtype=torch.long).to(device=device)
     bool_indices_random = indices_random
     inputs[bool_indices_random] = random_words[bool_indices_random]
 

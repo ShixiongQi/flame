@@ -157,7 +157,7 @@ class PyTorchNextWordPredictionTrainer(Trainer):
         mlm_probability = 0.15
 
         for batch_idx, (data, _) in enumerate(self.train_loader):
-            data, target = mask_tokens(data, tokenizer, mlm_probability, device=self.device)
+            data, target = mask_tokens(data.to(self.device), tokenizer, mlm_probability, device=self.device)
 
             data = Variable(data).to(device=self.device)
             target = Variable(target).to(device=self.device)

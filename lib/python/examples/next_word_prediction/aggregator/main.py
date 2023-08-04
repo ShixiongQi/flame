@@ -173,8 +173,7 @@ class PyTorchNextWordPredictionAggregator(TopAggregator):
 
     def initialize(self):
         """Initialize role."""
-        self.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu")
+        self.device = "cpu" # torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.model = init_model(self.data_dir, model="albert-base-v2").to(device=self.device)
 
@@ -207,7 +206,7 @@ class PyTorchNextWordPredictionAggregator(TopAggregator):
 
     def evaluate(self) -> None:
         """Evaluate (test) a model."""
-        test_loss, test_accuray, acc_5, testRes = test_pytorch_model(self.model, self.test_loader, device='cpu')
+        test_loss, test_accuray, acc_5, testRes = test_pytorch_model(self.model, self.test_loader, device=self.device)
 
         logger.info(f"Test loss: {test_loss}")
         logger.info(f"Test accuracy: {test_accuray}")
