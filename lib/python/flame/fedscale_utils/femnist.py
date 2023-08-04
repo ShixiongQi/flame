@@ -124,8 +124,8 @@ class FEMNIST():
 
         # load meta file to get labels
         # datas, labels = self.load_meta_data(os.path.join(self.processed_folder, 'client_data_mapping', self.data_file+'.csv'))
-        csv_path = os.path.join(self.meta_dir, self.data_file, 'client-'+str(self.partition_id)+'-'+self.data_file+'.csv')
-        logger.info(f"Loading CSV file from {csv_path}")
+        # csv_path = os.path.join(self.meta_dir, self.data_file, 'client-'+str(self.partition_id)+'-'+self.data_file+'.csv')
+        # logger.info(f"Loading CSV file from {csv_path}")
 
         datas, labels = self.load_meta_data(os.path.join(
             self.meta_dir, self.data_file, 'client-'+str(self.partition_id)+'-'+self.data_file+'.csv'))

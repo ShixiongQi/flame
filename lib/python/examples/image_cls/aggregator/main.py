@@ -21,6 +21,7 @@ https://github.com/pytorch/examples/blob/master/mnist/main.py.
 
 import logging
 import random
+import time
 
 from flame.mode.composer import Composer
 from flame.mode.tasklet import Loop, Tasklet
@@ -42,6 +43,9 @@ from flame.fedscale_utils.utils_data import get_data_transform
 from torch.autograd import Variable
 
 logger = logging.getLogger(__name__)
+log_file = "/mydata/aggregator.log"
+file_handler = logging.FileHandler(log_file)
+logger.addHandler(file_handler)
 
 def accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
@@ -161,8 +165,7 @@ class PyTorchFemnistAggregator(TopAggregator):
 
         test_loss, test_accuray, acc_5, testRes = test_pytorch_model(self.model, self.test_loader, device='cpu')
 
-        logger.info(f"Test loss: {test_loss}")
-        logger.info(f"Test accuracy: {test_accuray}")
+        logger.info(f"Wall-clock time: {time.time()} || Test loss: {test_loss} || Test accuracy: {test_accuray} || CPU time: {self.cpu_time} || CPU utilization: {self.utilization}")
 
         # update metrics after each evaluation so that the metrics can be
         # logged in a model registry.

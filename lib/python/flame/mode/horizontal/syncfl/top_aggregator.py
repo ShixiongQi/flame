@@ -52,7 +52,7 @@ TAG_AGGREGATE = "aggregate"
 PROP_ROUND_START_TIME = "round_start_time"
 PROP_ROUND_END_TIME = "round_end_time"
 
-ENABLE_NOISE = True
+ENABLE_NOISE = False
 num_duplication = 1
 custom_temp_dir = "/mydata/tmp"
 
@@ -126,6 +126,9 @@ class TopAggregator(Role, metaclass=ABCMeta):
                 f"supported frameworks are: {valid_frameworks}"
             )
 
+        self.cpu_time = None
+        self.utilization = None
+
     def get(self, tag: str) -> None:
         """Get data from remote role(s)."""
         if tag == TAG_AGGREGATE:
@@ -137,7 +140,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
             total_elements = w.numel()
             element_size = w.element_size()
             total_size += total_elements * element_size
-        print(f"total weights size: {total_size / 1024 / 1024} MB")
+        # print(f"total weights size: {total_size / 1024 / 1024} MB")
 
     def add_gaussian_noise_to_weight(self, weights):
         noise_std = 0.1  # Standard deviation of the Gaussian noise
@@ -158,8 +161,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
         total = 0
 
-        # process = psutil.Process()
-        start_cpu_time = psutil.cpu_times() #process.cpu_times()
+        start_cpu_time = psutil.cpu_times()
         # receive local model parameters from trainers
         for msg, metadata in channel.recv_fifo(channel.ends()):
             end, timestamp = metadata
@@ -189,7 +191,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
             logger.debug(f"{end}'s parameters trained with {count} samples")
 
             if ENABLE_NOISE:
-                start_duplication_cpu_time = psutil.cpu_times() # process.cpu_times()
+                start_duplication_cpu_time = psutil.cpu_times()
 
                 for i in range(0, num_duplication):
                     tmp_weights = deepcopy(weights)
@@ -200,7 +202,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
                         # save training result from trainer in a disk cache
                         self.cache[str(i)] = tres
 
-                end_duplication_cpu_time = psutil.cpu_times() # process.cpu_times()
+                end_duplication_cpu_time = psutil.cpu_times()
             else:
                 if weights is not None and count > 0:
                     total += count
@@ -231,15 +233,14 @@ class TopAggregator(Role, metaclass=ABCMeta):
         end_cpu_time = psutil.cpu_times() # process.cpu_times()
 
         if ENABLE_NOISE:
-            cpu_time = sum(end_cpu_time) - sum(start_cpu_time) - (sum(end_duplication_cpu_time) - sum(start_duplication_cpu_time))
+            self.cpu_time = sum(end_cpu_time) - sum(start_cpu_time) - (sum(end_duplication_cpu_time) - sum(start_duplication_cpu_time))
             idle_time_diff = end_cpu_time.idle - start_cpu_time.idle - (end_duplication_cpu_time.idle - start_duplication_cpu_time.idle)
         else:
-            cpu_time = sum(end_cpu_time) - sum(start_cpu_time)
+            self.cpu_time = sum(end_cpu_time) - sum(start_cpu_time)
             idle_time_diff = end_cpu_time.idle - start_cpu_time.idle
 
-        utilization = 100.0 * (1.0 - idle_time_diff / cpu_time) * psutil.cpu_count(logical=True)
-        print(f"CPU utilization: {utilization}")
-        print(f"CPU time: {cpu_time}")
+        self.utilization = 100.0 * (1.0 - idle_time_diff / self.cpu_time) * psutil.cpu_count(logical=True)
+        # logger.info(f"CPU time: {self.cpu_time} || CPU utilization: {self.utilization}")
 
     def put(self, tag: str) -> None:
         """Set data to remote role(s)."""
