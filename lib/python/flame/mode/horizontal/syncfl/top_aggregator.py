@@ -51,6 +51,9 @@ TAG_DISTRIBUTE = "distribute"
 TAG_AGGREGATE = "aggregate"
 PROP_ROUND_START_TIME = "round_start_time"
 PROP_ROUND_END_TIME = "round_end_time"
+
+ENABLE_NOISE = True
+num_duplication = 1
 custom_temp_dir = "/mydata/tmp"
 
 class TopAggregator(Role, metaclass=ABCMeta):
@@ -185,30 +188,25 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
             logger.debug(f"{end}'s parameters trained with {count} samples")
 
-            start_duplication_cpu_time = psutil.cpu_times() # process.cpu_times()
-            num_duplication = 1
-            for i in range(0, num_duplication):
-                tmp_weights = deepcopy(weights)
-                self.add_gaussian_noise_to_weight(tmp_weights)
-                if tmp_weights is not None and count > 0:
+            if ENABLE_NOISE:
+                start_duplication_cpu_time = psutil.cpu_times() # process.cpu_times()
+
+                for i in range(0, num_duplication):
+                    tmp_weights = deepcopy(weights)
+                    self.add_gaussian_noise_to_weight(tmp_weights)
+                    if tmp_weights is not None and count > 0:
+                        total += count
+                        tres = TrainResult(tmp_weights, count)
+                        # save training result from trainer in a disk cache
+                        self.cache[str(i)] = tres
+
+                end_duplication_cpu_time = psutil.cpu_times() # process.cpu_times()
+            else:
+                if weights is not None and count > 0:
                     total += count
-                    tres = TrainResult(tmp_weights, count)
+                    tres = TrainResult(weights, count)
                     # save training result from trainer in a disk cache
-                    self.cache[str(i)] = tres
-            end_duplication_cpu_time = psutil.cpu_times() # process.cpu_times()
-
-            """if weights is not None and count > 0:
-                total += count
-                tres = TrainResult(weights, count)
-                # save training result from trainer in a disk cache
-                self.cache[end] = tres"""
-
-            # delay = time.time() - timestamp.timestamp()
-            # end_cpu_time = process.cpu_times()
-            # cpu_usage = sum(end_cpu_time) - sum(start_cpu_time) - (sum(end_duplication_cpu_time) - sum(start_duplication_cpu_time))
-
-            # print(f"Queuing delay: {delay} second")
-            # print(f"CPU usage: {cpu_usage}")
+                    self.cache[end] = tres
 
         logger.debug(f"received {len(self.cache)} trainer updates in cache")
 
@@ -231,11 +229,15 @@ class TopAggregator(Role, metaclass=ABCMeta):
         self._update_model()
 
         end_cpu_time = psutil.cpu_times() # process.cpu_times()
-        cpu_time = sum(end_cpu_time) - sum(start_cpu_time) - (sum(end_duplication_cpu_time) - sum(start_duplication_cpu_time))
-        # cpu_usage = sum(end_cpu_time) - sum(start_cpu_time)
-        idle_time_diff = end_cpu_time.idle - start_cpu_time.idle - (end_duplication_cpu_time.idle - start_duplication_cpu_time.idle)
-        utilization = 100.0 * (1.0 - idle_time_diff / cpu_time) * psutil.cpu_count(logical=True)
 
+        if ENABLE_NOISE:
+            cpu_time = sum(end_cpu_time) - sum(start_cpu_time) - (sum(end_duplication_cpu_time) - sum(start_duplication_cpu_time))
+            idle_time_diff = end_cpu_time.idle - start_cpu_time.idle - (end_duplication_cpu_time.idle - start_duplication_cpu_time.idle)
+        else:
+            cpu_usage = sum(end_cpu_time) - sum(start_cpu_time)
+            idle_time_diff = end_cpu_time.idle - start_cpu_time.idle
+
+        utilization = 100.0 * (1.0 - idle_time_diff / cpu_time) * psutil.cpu_count(logical=True)
         print(f"CPU utilization: {utilization}")
         print(f"CPU time: {cpu_time}")
 
