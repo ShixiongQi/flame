@@ -347,8 +347,7 @@ class PyTorchGoogleSpeechAggregator(TopAggregator):
 
     def initialize(self):
         """Initialize role."""
-        self.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu")
+        self.device = "cpu" # torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.model = resnet18(num_classes=35, in_channels=1).to(self.device)
 

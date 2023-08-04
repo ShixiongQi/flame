@@ -130,8 +130,7 @@ class PyTorchFemnistAggregator(TopAggregator):
 
     def initialize(self):
         """Initialize role."""
-        self.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu")
+        self.device = "cpu" # torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.model = tormodels.__dict__["resnet18"](num_classes=62).to(device=self.device)
 
