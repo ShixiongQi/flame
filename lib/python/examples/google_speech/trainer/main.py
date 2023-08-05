@@ -364,9 +364,6 @@ class PyTorchGoogleSpeechTrainer(Trainer):
             loss.backward()
             self.optimizer.step()
 
-            # Weight handler 
-            # self.optimizer.update_client_weight(conf, model, self.global_model if self.global_model is not None else None)
-
             self.completed_steps += 1
 
             if self.completed_steps == self.local_steps:

@@ -21,6 +21,7 @@ https://github.com/pytorch/examples/blob/master/mnist/main.py.
 
 import logging
 import random
+import time
 
 from flame.mode.composer import Composer
 from flame.mode.tasklet import Loop, Tasklet
@@ -49,6 +50,9 @@ from flame.fedscale_utils.transforms_wav import (FixAudioLength, LoadAudio,
                                                     ToTensor)
 
 logger = logging.getLogger(__name__)
+log_file = "/mydata/google_speech_aggregator.log"
+file_handler = logging.FileHandler(log_file)
+logger.addHandler(file_handler)
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152']
@@ -374,7 +378,17 @@ class PyTorchGoogleSpeechAggregator(TopAggregator):
 
     def evaluate(self) -> None:
         """Evaluate (test) a model."""
-        test_pytorch_model(self.model, self.test_loader, device='cpu')
+
+        test_loss, test_accuray, acc_5, testRes = test_pytorch_model(self.model, self.test_loader, device='cpu')
+
+        logger.info(f"Wall-clock time: {time.time()} || Test loss: {test_loss} || Test accuracy: {test_accuray} || CPU time: {self.cpu_time} || CPU utilization: {self.utilization}")
+
+        # update metrics after each evaluation so that the metrics can be
+        # logged in a model registry.
+        self.update_metrics({
+            'test-loss': test_loss,
+            'test-accuracy': test_accuray
+        })
         # pass
 
     def compose(self) -> None:
