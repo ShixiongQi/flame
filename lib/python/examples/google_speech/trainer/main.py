@@ -296,7 +296,7 @@ class PyTorchGoogleSpeechTrainer(Trainer):
             "cuda" if torch.cuda.is_available() else "cpu")
         print(f" torch.cuda.is_available(): {torch.cuda.is_available()}")
 
-        self.model = resnet18(num_classes=35, in_channels=1).to(self.device)
+        self.model = resnet34(num_classes=35, in_channels=1).to(self.device)
 
     def load_background_noise_data(self) -> None: 
         """Loading Background Noise Dataset"""

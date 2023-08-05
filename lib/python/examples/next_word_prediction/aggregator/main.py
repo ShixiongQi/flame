@@ -20,6 +20,7 @@ Model and data loader are imported from FedScale
 
 import logging
 import random
+import time
 
 from flame.mode.composer import Composer
 from flame.mode.tasklet import Loop, Tasklet
@@ -46,6 +47,9 @@ from flame.fedscale_utils.nlp import load_and_cache_examples, mask_tokens
 from flame.fedscale_utils.divide_data import DataPartitioner
 
 logger = logging.getLogger(__name__)
+log_file = "/mydata/reddit_aggregator.log"
+file_handler = logging.FileHandler(log_file)
+logger.addHandler(file_handler)
 
 tokenizer = AlbertTokenizer.from_pretrained('albert-base-v2', do_lower_case=True)
 
@@ -208,8 +212,7 @@ class PyTorchNextWordPredictionAggregator(TopAggregator):
         """Evaluate (test) a model."""
         test_loss, test_accuray, acc_5, testRes = test_pytorch_model(self.model, self.test_loader, device=self.device)
 
-        logger.info(f"Test loss: {test_loss}")
-        logger.info(f"Test accuracy: {test_accuray}")
+        logger.info(f"Wall-clock time: {time.time()} || Test loss: {test_loss} || Test accuracy: {acc_5} || CPU time: {self.cpu_time} || CPU utilization: {self.utilization}")
 
         # update metrics after each evaluation so that the metrics can be
         # logged in a model registry.

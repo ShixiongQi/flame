@@ -322,8 +322,8 @@ def test_pytorch_model(model, test_data, device='cpu'):
     acc_5 = round(top_5 / test_len, 4)
     test_loss = round(test_loss, 4)
 
-    logging.info('Test set: Average loss: {}, Top-1 Accuracy: {}/{} ({}), Top-5 Accuracy: {}'
-                 .format(test_loss, correct, len(test_data.dataset), acc, acc_5))
+    # logging.info('Test set: Average loss: {}, Top-1 Accuracy: {}/{} ({}), Top-5 Accuracy: {}'
+    #              .format(test_loss, correct, len(test_data.dataset), acc, acc_5))
 
     testRes = {'top_1': correct, 'top_5': top_5,
                'test_loss': sum_loss, 'test_len': test_len}
@@ -353,7 +353,7 @@ class PyTorchGoogleSpeechAggregator(TopAggregator):
         """Initialize role."""
         self.device = "cpu" # torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.model = resnet18(num_classes=35, in_channels=1).to(self.device)
+        self.model = resnet34(num_classes=35, in_channels=1).to(self.device)
 
     def load_data(self) -> None:
         """Load a test dataset."""
@@ -381,7 +381,7 @@ class PyTorchGoogleSpeechAggregator(TopAggregator):
 
         test_loss, test_accuray, acc_5, testRes = test_pytorch_model(self.model, self.test_loader, device='cpu')
 
-        logger.info(f"Wall-clock time: {time.time()} || Test loss: {test_loss} || Test accuracy: {test_accuray} || CPU time: {self.cpu_time} || CPU utilization: {self.utilization}")
+        logger.info(f"Wall-clock time: {time.time()} || Test loss: {test_loss} || Test accuracy: {acc_5} || CPU time: {self.cpu_time} || CPU utilization: {self.utilization}")
 
         # update metrics after each evaluation so that the metrics can be
         # logged in a model registry.

@@ -120,7 +120,7 @@ class SPEECH():
         rawData, rawTags = [], []
 
         csv_path = os.path.join(self.meta_dir, self.data_file, 'client-'+str(self.partition_id)+'-'+self.data_file+'.csv')
-        logger.info(f"Loading CSV file from {csv_path}")
+        # logger.info(f"Loading CSV file from {csv_path}")
 
         # load meta file to get labels
         classMapping = self.load_meta_data(csv_path)
