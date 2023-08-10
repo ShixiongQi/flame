@@ -1,5 +1,5 @@
 {
-    "taskid": "49d06b7526964db86cf37c70e8e0cdb6bd7aa752",
+    "taskid": "49d06b7526964db86cf37c70e8e0cdb6bd7aa744",
     "backend": "p2p",
     "brokers": [
         {
@@ -12,15 +12,16 @@
         }
     ],
     "groupAssociation": {
-        "trainer-coord-channel": "default",
-        "param-channel": "default"
+        "middle-agg-coord-channel": "default",
+        "param-channel": "default",
+        "global-channel": "default"
     },
     "channels": [
         {
-            "name": "trainer-coord-channel",
-            "description": "Channel between trainer and coordinator",
+            "name": "middle-agg-coord-channel",
+            "description": "Channel between middle aggregator and coordinator",
             "pair": [
-                "trainer",
+                "middle-aggregator",
                 "coordinator"
             ],
             "groupBy": {
@@ -30,11 +31,35 @@
                 ]
             },
             "funcTags": {
-                "trainer": [
+                "middle-aggregator": [
                     "coordinate"
                 ],
                 "coordinator": [
-                    "coordinateWithTrainer"
+                    "coordinateWithMidAgg"
+                ]
+            }
+        },
+        {
+            "description": "Model update is sent from mid aggregator to global aggregator and vice-versa",
+            "groupBy": {
+                "type": "tag",
+                "value": [
+                    "default"
+                ]
+            },
+            "name": "global-channel",
+            "pair": [
+                "top-aggregator",
+                "middle-aggregator"
+            ],
+            "funcTags": {
+                "top-aggregator": [
+                    "distribute",
+                    "aggregate"
+                ],
+                "middle-aggregator": [
+                    "fetch",
+                    "upload"
                 ]
             }
         },
@@ -89,6 +114,6 @@
         "kwargs": {}
     },
     "maxRunTime": 300,
-    "realm": "org1-cluster",
-    "role": "trainer"
+    "realm": "default-cluster",
+    "role": "middle-aggregator"
 }
