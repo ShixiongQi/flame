@@ -115,6 +115,9 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
 
     def _fetch_weights(self, tag: str) -> None:
         logger.debug("calling _fetch_weights")
+
+        FETCH_START_T = time.time()
+
         channel = self.cm.get_by_tag(tag)
         if not channel:
             logger.debug(f"[_fetch_weights] channel not found with tag {tag}")
@@ -136,7 +139,17 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
         if MessageType.ROUND in msg:
             self._round = msg[MessageType.ROUND]
 
+        if MessageType.SEND_TIMESTAMP in msg:
+            self.MSG_SENT_T = msg[MessageType.SEND_TIMESTAMP]
+
+        FETCH_SUCCESS_T = time.time()
+
+        self.msg_from_top_delay = FETCH_SUCCESS_T - self.MSG_SENT_T
+        self.fetch_delay = FETCH_SUCCESS_T - FETCH_START_T
+
     def _distribute_weights(self, tag: str) -> None:
+        DIST_START_T = time.time()
+
         channel = self.cm.get_by_tag(tag)
         if not channel:
             logger.debug(f"channel not found for tag {tag}")
@@ -157,17 +170,33 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
                 {
                     MessageType.WEIGHTS: self.weights,
                     MessageType.ROUND: self._round,
+                    MessageType.SEND_TIMESTAMP: time.time(),
                 },
             )
+
+        DIST_COMP_T = time.time()
+        self.dist_delay = DIST_COMP_T - DIST_START_T
 
     def _aggregate_weights(self, tag: str) -> None:
         channel = self.cm.get_by_tag(tag)
         if not channel:
             return
 
+        RECV_START_T = time.time()
+
         total = 0
+        self.N_ENDS = len(channel.ends())
+        self.msg_from_tr_delays = []
+        self.cache_delays = []
+        RECV_FIRST_T = time.time() # Init. time to receive first update
+        RECV_LAST_T = time.time() # Init. time to receive last update
         # receive local model parameters from trainers
         for msg, metadata in channel.recv_fifo(channel.ends()):
+            if total == 0:
+                RECV_FIRST_T = time.time()
+            else:
+                RECV_LAST_T = time.time()
+
             end, _ = metadata
             if not msg:
                 logger.debug(f"No data from {end}; skipping it")
@@ -179,16 +208,29 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
             if MessageType.DATASET_SIZE in msg:
                 count = msg[MessageType.DATASET_SIZE]
 
+            if MessageType.SEND_TIMESTAMP in msg:
+                self.MSG_SENT_T = msg[MessageType.SEND_TIMESTAMP]
+
             logger.debug(f"{end}'s parameters trained with {count} samples")
 
+            self.msg_from_tr_delays.append(time.time() - self.MSG_SENT_T)
+
+            CACHE_START_T = time.time()
             if weights is not None and count > 0:
                 total += count
                 tres = TrainResult(weights, count)
                 # save training result from trainer in a disk cache
                 self.cache[end] = tres
+            CACHE_END_T = time.time()
+            self.cache_delays.append(CACHE_END_T - CACHE_START_T)
 
         logger.debug(f"received {len(self.cache)} trainer updates in cache")
 
+        RECV_COMP_T = time.time()
+        self.recv_delay = RECV_COMP_T - RECV_START_T
+        self.queue_delay = RECV_LAST_T - RECV_FIRST_T
+
+        AGG_START_T = time.time()
         # optimizer conducts optimization (in this case, aggregation)
         global_weights = self.optimizer.do(
             deepcopy(self.weights), self.cache, total=total
@@ -205,8 +247,14 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
         self.weights = global_weights
         self.dataset_size = total
 
+        AGG_END_T = time.time()
+        self.agg_delay = AGG_END_T - AGG_START_T
+
     def _send_weights(self, tag: str) -> None:
         logger.debug("calling _send_weights")
+
+        SEND_START_T = time.time()
+
         channel = self.cm.get_by_tag(tag)
         if not channel:
             logger.debug(f"channel not found with {tag}")
@@ -224,9 +272,13 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
             MessageType.WEIGHTS: delta_weights,
             MessageType.DATASET_SIZE: self.dataset_size,
             MessageType.MODEL_VERSION: self._round,
+            MessageType.SEND_TIMESTAMP: time.time(),
         }
         channel.send(end, msg)
         logger.debug("sending weights done")
+
+        SEND_COMP_T = time.time()
+        self.send_delay = SEND_COMP_T - SEND_START_T
 
     def _send_dummy_weights(self, tag: str) -> None:
         channel = self.cm.get_by_tag(tag)
@@ -256,6 +308,20 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
         # set necessary properties to help channel decide how to select ends
         channel.set_property("round", self._round)
 
+        logger.info(f"Wall-clock time: {time.time()} || "
+                    f"Round: {self._round} || "
+                    f"#TRs: {self.N_ENDS} || "
+                    f"Agg delay (s): {self.agg_delay:.4f} || "
+                    f"Fetch task delay: {self.fetch_delay:.4f} || "
+                    f"DIST task delay: {self.dist_delay:.4f} || "
+                    f"RECV task delay: {self.recv_delay:.4f} || "
+                    f"SEND task delay: {self.send_delay:.4f} || "
+                    f"Queueing delay: {self.queue_delay:.4f} || "
+                    f"MSG (from top) delay: {self.msg_from_top_delay:.4f} || "
+                    f"MSG (from trainer) Ave. delay: {sum(self.msg_from_tr_delays)/len(self.msg_from_tr_delays):.4f} || "
+                    f"Total cache delay: {sum(self.cache_delays):.4f} || "
+                    f"Ave. cache delay: {sum(self.cache_delays)/len(self.cache_delays):.4f}")
+        
     def inform_end_of_training(self) -> None:
         """Inform all the trainers that the training is finished."""
         logger.debug("inform end of training")

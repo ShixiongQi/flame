@@ -15,6 +15,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import time
 
 from flame.mode.composer import CloneComposer
 from flame.mode.horizontal.syncfl.top_aggregator import TAG_AGGREGATE, TAG_DISTRIBUTE
@@ -42,6 +43,8 @@ class TopAggregator(BaseTopAggregator):
 
     def get_coordinated_ends(self):
         """Receive the ends of middle aggregators."""
+        COORD_START_T = time.time()
+
         logger.debug("calling get_coordinate_ends()")
         channel = self.get_channel(TAG_COORDINATE)
 
@@ -59,6 +62,8 @@ class TopAggregator(BaseTopAggregator):
         dist_channel.ends = lambda: msg[MessageType.COORDINATED_ENDS]
 
         logger.debug("exited get_coordinate_ends()")
+        COORD_END_T = time.time()
+        self.coordination_delay = COORD_END_T - COORD_END_T
 
     def compose(self) -> None:
         """Compose role with tasklets."""

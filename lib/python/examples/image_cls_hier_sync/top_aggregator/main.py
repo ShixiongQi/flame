@@ -47,6 +47,9 @@ log_file = "/mydata/image_cls_aggregator.log"
 file_handler = logging.FileHandler(log_file)
 logger.addHandler(file_handler)
 
+def override(method):
+    return method
+
 def accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
     with torch.no_grad():
@@ -132,6 +135,9 @@ class PyTorchFemnistAggregator(TopAggregator):
         self.meta_dir = "/mydata/flame_dataset/femnist/"
         self.partition_id = 1
 
+        self.previous_round_time = time.time()
+        self.current_round_time = time.time()
+
     def initialize(self):
         """Initialize role."""
         self.device = "cpu" # torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -141,6 +147,7 @@ class PyTorchFemnistAggregator(TopAggregator):
 
     def load_data(self) -> None:
         """Load a test dataset."""
+        LOAD_START_T = time.time()
 
         # Generate a random parition ID
         self.partition_id = random.randint(1, 11)
@@ -155,6 +162,9 @@ class PyTorchFemnistAggregator(TopAggregator):
 
         self.dataset = Dataset(dataloader=self.test_loader)
 
+        LOAD_END_T = time.time()
+        self.load_data_delay = LOAD_END_T - LOAD_START_T
+
     def train(self) -> None:
         """Train a model."""
         # Implement this if testing is needed in aggregator
@@ -162,10 +172,30 @@ class PyTorchFemnistAggregator(TopAggregator):
 
     def evaluate(self) -> None:
         """Evaluate (test) a model."""
-
+        EVAL_START_T = time.time()
         test_loss, test_accuray, acc_5, testRes = test_pytorch_model(self.model, self.test_loader, device='cpu')
+        EVAL_END_T = time.time()
+        self.eval_delay = EVAL_END_T - EVAL_START_T
 
-        logger.info(f"Wall-clock time: {time.time()} || Test loss: {test_loss} || Test accuracy: {test_accuray} || CPU time: {self.cpu_time} || CPU utilization: {self.utilization}")
+        self.current_round_time = time.time()
+        logger.info(f"Wall-clock time: {self.current_round_time} ||"
+                    f"Test loss: {test_loss} || "
+                    f"Test accuracy: {test_accuray} || "
+                    f"CPU time: {self.cpu_time:.4f} || "
+                    f"CPU utilization: {self.utilization:.4f} || "
+                    f"R#{self._round}'s duration (s): {self.current_round_time-self.previous_round_time:.4f} || "
+                    f"Loading data delay (s): {self.load_data_delay:.4f} || "
+                    f"Eval delay (s): {self.eval_delay:.4f} || "
+                    f"Agg delay (s): {self.agg_delay:.4f} || "
+                    f"Coordination delay (s): {self.coordination_delay:.4f} || "
+                    f"DIST task delay: {self.dist_delay:.4f} || "
+                    f"RECV task delay: {self.recv_delay:.4f} || "
+                    f"Queueing delay: {self.queue_delay:.4f} || "
+                    f"MSG (from mid) Ave. delay: {sum(self.msg_from_mid_delays)/len(self.msg_from_mid_delays):.4f} || "
+                    f"Total cache delay: {sum(self.cache_delays):.4f} || "
+                    f"Ave. cache delay: {sum(self.cache_delays)/len(self.cache_delays):.4f}")
+
+        self.previous_round_time = self.current_round_time
 
         # update metrics after each evaluation so that the metrics can be
         # logged in a model registry.
@@ -174,6 +204,7 @@ class PyTorchFemnistAggregator(TopAggregator):
             'test-accuracy': test_accuray
         })
 
+    @override
     def compose(self) -> None:
         """Compose role with tasklets."""
         with Composer() as composer:

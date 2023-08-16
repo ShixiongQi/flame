@@ -114,11 +114,25 @@ class Coordinator(Role):
 
         # randomly pair aggregator with trainers
         # TODO: other pairing can be implemented
+        """
         for trainer_end in trainer_ends:
             agg_end = random.choice(agg_ends)
             self.trainer_to_agg[trainer_end] = agg_end
 
             self.agg_to_trainer[agg_end].append(trainer_end)
+        """
+
+        # round-robin pair aggregator with trainers
+        trainer_idx = 0
+        for trainer_end in trainer_ends:
+            agg_end = agg_ends[trainer_idx % len(agg_ends)]
+            self.trainer_to_agg[trainer_end] = agg_end
+
+            self.agg_to_trainer[agg_end].append(trainer_end)
+            trainer_idx += 1
+
+        # for k in self.agg_to_trainer:
+        #     print(f"{len(self.agg_to_trainer[k])} trainers assigned to MID-agg {k}")
 
         logger.debug("finished paring mid aggs and trainers")
 
@@ -217,8 +231,6 @@ class Coordinator(Role):
 
     def evaluate(self) -> None:
         pass
-
-    ###
 
     def compose(self) -> None:
         """Compose role with tasklets."""

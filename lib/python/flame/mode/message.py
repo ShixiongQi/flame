@@ -50,3 +50,5 @@ class MessageType(Enum):
 
     REQ_COORDINATED_ENDS = 16  # request ends coordinated by a coordinator
     RES_COORDINATED_ENDS = 17  # get ends coordinated by a coordinator
+
+    SEND_TIMESTAMP = 18  # timestamp when the message is sent out. used for e2e delay measurement

@@ -21,6 +21,7 @@ https://github.com/pytorch/examples/blob/master/mnist/main.py.
 
 import logging
 import random
+import time
 
 from flame.mode.composer import Composer
 from flame.mode.tasklet import Loop, Tasklet
@@ -43,6 +44,8 @@ from torch.autograd import Variable
 
 logger = logging.getLogger(__name__)
 
+def override(method):
+    return method
 
 class PyTorchFemnistTrainer(Trainer):
     """PyTorch Femnist Trainer."""
@@ -68,6 +71,10 @@ class PyTorchFemnistTrainer(Trainer):
         self.meta_dir = "/mydata/flame_dataset/femnist/"
         self.partition_id = 1
 
+        # Latency metrics
+        self.load_data_delay = 0
+        self.local_training_delay = 0
+
     def initialize(self) -> None:
         """Initialize role."""
         self.device = torch.device(
@@ -77,6 +84,7 @@ class PyTorchFemnistTrainer(Trainer):
 
     def load_data(self) -> None:
         """Load data."""
+        m_start_t = time.time()
 
         # Generate a random parition ID
         self.partition_id = random.randint(1, 3399)
@@ -85,15 +93,17 @@ class PyTorchFemnistTrainer(Trainer):
         train_dataset = FEMNIST(self.data_dir, self.meta_dir, self.partition_id,
                                 dataset='train', transform=train_transform)
 
-        # indices = torch.arange(2000)
-        # train_dataset = data_utils.Subset(train_dataset, indices)
-
         self.train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size,
                 shuffle=True, pin_memory=True, timeout=0,
                 num_workers=0, drop_last=True)
 
+        m_end_t = time.time()
+        self.load_data_delay = m_end_t - m_start_t
+
     def train(self) -> None:
         """Train a model."""
+        m_start_t = time.time()
+
         self.optimizer = optim.Adadelta(self.model.parameters())
 
         for epoch in range(1, self.epochs + 1):
@@ -101,6 +111,9 @@ class PyTorchFemnistTrainer(Trainer):
 
         # save dataset size so that the info can be shared with aggregator
         self.dataset_size = len(self.train_loader.dataset)
+
+        m_end_t = time.time()
+        self.local_training_delay = m_end_t - m_start_t
 
     def _train_epoch(self, epoch):
         self.model.train()
@@ -134,13 +147,32 @@ class PyTorchFemnistTrainer(Trainer):
             if self.completed_steps == self.local_steps:
                 break
 
-        logger.info(f"loss: {loss.item():.6f} \t moving_loss: {self.epoch_train_loss}")
+        # logger.info(f"loss: {loss.item():.6f} \t moving_loss: {self.epoch_train_loss}")
 
     def evaluate(self) -> None:
         """Evaluate a model."""
         # Implement this if testing is needed in trainer
         pass
 
+    @override
+    def save_metrics(self):
+        """Save metrics in a model registry."""
+
+        self.metrics = self.metrics | self.mc.get()
+        self.mc.clear()
+        logger.debug(f"saving metrics: {self.metrics}")
+        if self.metrics:
+            self.registry_client.save_metrics(self._round - 1, self.metrics)
+            logger.debug("saving metrics done")
+
+        logger.info(f"Wall-clock time: {time.time()} || "
+                    f"Training delay (s): {self.local_training_delay:.4f} || "
+                    f"Loading data delay (s): {self.load_data_delay:.4f} || "
+                    f"Fetch task delay: {self.fetch_delay:.4f} || "
+                    f"MSG delay: {self.msg_delay:.4f} || "
+                    f"Send task delay: {self.send_delay:.4f}")
+
+    @override
     def compose(self) -> None:
         """Compose role with tasklets."""
         with Composer() as composer:

@@ -159,17 +159,26 @@ class TopAggregator(Role, metaclass=ABCMeta):
         if not channel:
             return
 
-        total = 0
+        RECV_START_T = time.time()
 
+        total = 0
+        self.N_ENDS = len(channel.ends())
+        self.msg_from_mid_delays = []
+        self.cache_delays = []
+        RECV_FIRST_T = time.time() # Init. time to receive first update
+        RECV_LAST_T = time.time() # Init. time to receive last update
         start_cpu_time = psutil.cpu_times()
         # receive local model parameters from trainers
         for msg, metadata in channel.recv_fifo(channel.ends()):
+            if total == 0:
+                RECV_FIRST_T = time.time()
+            else:
+                RECV_LAST_T = time.time()
+
             end, timestamp = metadata
             if not msg:
                 logger.debug(f"No data from {end}; skipping it")
                 continue
-            # delay = time.time() - timestamp.timestamp()
-            # print(f"Networking delay: {delay} second")
 
             logger.debug(f"received data from {end}")
             channel.set_end_property(end, PROP_ROUND_END_TIME, (round, timestamp))
@@ -188,8 +197,14 @@ class TopAggregator(Role, metaclass=ABCMeta):
                     channel,
                 )
 
+            if MessageType.SEND_TIMESTAMP in msg:
+                self.MSG_SENT_T = msg[MessageType.SEND_TIMESTAMP]
+
             logger.debug(f"{end}'s parameters trained with {count} samples")
 
+            self.msg_from_mid_delays.append(time.time() - self.MSG_SENT_T)
+
+            CACHE_START_T = time.time()
             if ENABLE_NOISE:
                 start_duplication_cpu_time = psutil.cpu_times()
 
@@ -209,9 +224,16 @@ class TopAggregator(Role, metaclass=ABCMeta):
                     tres = TrainResult(weights, count)
                     # save training result from trainer in a disk cache
                     self.cache[end] = tres
+            CACHE_END_T = time.time()
+            self.cache_delays.append(CACHE_END_T - CACHE_START_T)
 
         logger.debug(f"received {len(self.cache)} trainer updates in cache")
 
+        RECV_COMP_T = time.time()
+        self.recv_delay = RECV_COMP_T - RECV_START_T
+        self.queue_delay = RECV_LAST_T - RECV_FIRST_T
+
+        AGG_START_T = time.time()
         # optimizer conducts optimization (in this case, aggregation)
         global_weights = self.optimizer.do(
             deepcopy(self.weights),
@@ -229,6 +251,9 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
         # update model with global weights
         self._update_model()
+
+        AGG_END_T = time.time()
+        self.agg_delay = AGG_END_T - AGG_START_T
 
         end_cpu_time = psutil.cpu_times() # process.cpu_times()
 
@@ -249,6 +274,8 @@ class TopAggregator(Role, metaclass=ABCMeta):
             self._distribute_weights(tag)
 
     def _distribute_weights(self, tag: str) -> None:
+        DIST_START_T = time.time()
+
         channel = self.cm.get_by_tag(tag)
         if not channel:
             logger.debug(f"channel not found for tag {tag}")
@@ -274,12 +301,16 @@ class TopAggregator(Role, metaclass=ABCMeta):
                     ),
                     MessageType.ROUND: self._round,
                     MessageType.DATASAMPLER_METADATA: datasampler_metadata,
+                    MessageType.SEND_TIMESTAMP: time.time(),
                 },
             )
             # register round start time on each end for round duration measurement.
             channel.set_end_property(
                 end, PROP_ROUND_START_TIME, (round, datetime.now())
             )
+        
+        DIST_END_T = time.time()
+        self.dist_delay = DIST_END_T - DIST_START_T
 
     def inform_end_of_training(self) -> None:
         """Inform all the trainers that the training is finished."""
