@@ -75,6 +75,11 @@ class PyTorchFemnistTrainer(Trainer):
         self.load_data_delay = 0
         self.local_training_delay = 0
 
+        # Output logs
+        log_file = f"/mydata/image_cls-trainer-{config.task_id}.log"
+        file_handler = logging.FileHandler(log_file)
+        logger.addHandler(file_handler)
+
     def initialize(self) -> None:
         """Initialize role."""
         self.device = torch.device(

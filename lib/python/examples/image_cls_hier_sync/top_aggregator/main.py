@@ -43,7 +43,7 @@ from flame.fedscale_utils.utils_data import get_data_transform
 from torch.autograd import Variable
 
 logger = logging.getLogger(__name__)
-log_file = "/mydata/image_cls_aggregator.log"
+log_file = "/mydata/image_cls-top_aggregator.log"
 file_handler = logging.FileHandler(log_file)
 logger.addHandler(file_handler)
 

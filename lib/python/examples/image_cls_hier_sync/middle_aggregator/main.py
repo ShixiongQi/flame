@@ -36,6 +36,11 @@ class TorchMnistMiddleAggregator(MiddleAggregator):
         """Initialize a class instance."""
         self.config = config
 
+        # Output logs
+        log_file = f"/mydata/image_cls-mid_aggregator-{config.task_id}.log"
+        file_handler = logging.FileHandler(log_file)
+        logger.addHandler(file_handler)
+
     def initialize(self):
         """Initialize role."""
         pass
