@@ -178,7 +178,6 @@ class PyTorchFemnistTrainer(Trainer):
                     f"Send task delay: {self.send_delay:.4f}")
 
         logger.info(f"Trainer ({self.config.task_id}) Timestamps: "
-                    f"MSG_START_T: {self.MSG_START_T}, MSG_END_T: {self.MSG_END_T} || "
                     f"TRAIN_START_T: {self.TRAIN_START_T}, TRAIN_END_T: {self.TRAIN_END_T} || "
                     f"LOAD_START_T: {self.LOAD_START_T}, LOAD_END_T: {self.LOAD_END_T} || "
                     f"FETCH_START_T: {self.FETCH_START_T}, FETCH_END_T: {self.FETCH_END_T} || "
