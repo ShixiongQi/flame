@@ -199,6 +199,8 @@ class PyTorchFemnistAggregator(TopAggregator):
                     f"CACHE, CACHE_START_T: {self.CACHE_START_T}, CACHE_END_T: {self.CACHE_END_T} || "
                     f"AGG, AGG_START_T: {self.AGG_START_T}, AGG_END_T: {self.AGG_END_T} || "
                     f"EVAL, EVAL_START_T: {self.EVAL_START_T}, EVAL_END_T: {self.EVAL_END_T} || "
+                    f"RECV, RECV_START_T: {self.RECV_START_T}, RECV_END_T: {self.RECV_END_T} || "
+                    f"DIST, DIST_START_T: {self.DIST_START_T}, DIST_END_T: {self.DIST_END_T} || "
                     f"LOAD, LOAD_START_T: {self.LOAD_START_T}, LOAD_END_T: {self.LOAD_END_T}")
 
         self.previous_round_time = self.current_round_time
