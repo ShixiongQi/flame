@@ -196,10 +196,10 @@ class PyTorchFemnistAggregator(TopAggregator):
                     f"Ave. cache delay: {sum(self.cache_delays)/len(self.cache_delays):.4f}")
 
         logger.info(f"Top Aggregator Timestamps: "
-                    f"CACHE_START_T: {self.CACHE_START_T}, CACHE_END_T: {self.CACHE_END_T} || "
-                    f"AGG_START_T: {self.AGG_START_T}, AGG_END_T: {self.AGG_END_T} || "
-                    f"EVAL_START_T: {self.EVAL_START_T}, EVAL_END_T: {self.EVAL_END_T} || "
-                    f"LOAD_START_T: {self.LOAD_START_T}, LOAD_END_T: {self.LOAD_END_T}")
+                    f"CACHE, CACHE_START_T: {self.CACHE_START_T}, CACHE_END_T: {self.CACHE_END_T} || "
+                    f"AGG, AGG_START_T: {self.AGG_START_T}, AGG_END_T: {self.AGG_END_T} || "
+                    f"EVAL, EVAL_START_T: {self.EVAL_START_T}, EVAL_END_T: {self.EVAL_END_T} || "
+                    f"LOAD, LOAD_START_T: {self.LOAD_START_T}, LOAD_END_T: {self.LOAD_END_T}")
 
         self.previous_round_time = self.current_round_time
 
