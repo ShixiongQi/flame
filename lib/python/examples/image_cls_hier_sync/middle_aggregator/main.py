@@ -84,6 +84,14 @@ class TorchMnistMiddleAggregator(MiddleAggregator):
                     f"Total cache delay: {sum(self.cache_delays):.4f} || "
                     f"Ave. cache delay: {sum(self.cache_delays)/len(self.cache_delays):.4f}")
 
+        logger.info(f"Mid Agg ({self.config.task_id}) Timestamps: "
+                    f"CACHE_START_T: {self.CACHE_START_T}, CACHE_END_T: {self.CACHE_END_T} || "
+                    f"AGG_START_T: {self.AGG_START_T}, AGG_END_T: {self.AGG_END_T} || "
+                    f"FETCH_START_T: {self.FETCH_START_T}, FETCH_END_T: {self.FETCH_END_T} || "
+                    f"SEND_START_T: {self.SEND_START_T}, SEND_END_T: {self.SEND_END_T} || "
+                    f"DIST_START_T: {self.DIST_START_T}, DIST_END_T: {self.DIST_END_T} || "
+                    f"RECV_START_T: {self.RECV_START_T}, RECV_END_T: {self.RECV_END_T}")
+
 if __name__ == "__main__":
     import argparse
 

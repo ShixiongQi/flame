@@ -116,7 +116,7 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
     def _fetch_weights(self, tag: str) -> None:
         logger.debug("calling _fetch_weights")
 
-        FETCH_START_T = time.time()
+        self.FETCH_START_T = time.time()
 
         channel = self.cm.get_by_tag(tag)
         if not channel:
@@ -142,13 +142,13 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
         if MessageType.SEND_TIMESTAMP in msg:
             self.MSG_SENT_T = msg[MessageType.SEND_TIMESTAMP]
 
-        FETCH_SUCCESS_T = time.time()
+        self.FETCH_END_T = time.time()
 
-        self.msg_from_top_delay = FETCH_SUCCESS_T - self.MSG_SENT_T
-        self.fetch_delay = FETCH_SUCCESS_T - FETCH_START_T
+        self.msg_from_top_delay = self.FETCH_END_T - self.MSG_SENT_T
+        self.fetch_delay = self.FETCH_END_T - self.FETCH_START_T
 
     def _distribute_weights(self, tag: str) -> None:
-        DIST_START_T = time.time()
+        self.DIST_START_T = time.time()
 
         channel = self.cm.get_by_tag(tag)
         if not channel:
@@ -174,15 +174,15 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
                 },
             )
 
-        DIST_COMP_T = time.time()
-        self.dist_delay = DIST_COMP_T - DIST_START_T
+        self.DIST_END_T = time.time()
+        self.dist_delay = self.DIST_END_T - self.DIST_START_T
 
     def _aggregate_weights(self, tag: str) -> None:
         channel = self.cm.get_by_tag(tag)
         if not channel:
             return
 
-        RECV_START_T = time.time()
+        self.RECV_START_T = time.time()
 
         total = 0
         self.N_ENDS = len(channel.ends())
@@ -215,22 +215,22 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
 
             self.msg_from_tr_delays.append(time.time() - self.MSG_SENT_T)
 
-            CACHE_START_T = time.time()
+            self.CACHE_START_T = time.time()
             if weights is not None and count > 0:
                 total += count
                 tres = TrainResult(weights, count)
                 # save training result from trainer in a disk cache
                 self.cache[end] = tres
-            CACHE_END_T = time.time()
-            self.cache_delays.append(CACHE_END_T - CACHE_START_T)
+            self.CACHE_END_T = time.time()
+            self.cache_delays.append(self.CACHE_END_T - self.CACHE_START_T)
 
         logger.debug(f"received {len(self.cache)} trainer updates in cache")
 
-        RECV_COMP_T = time.time()
-        self.recv_delay = RECV_COMP_T - RECV_START_T
+        self.RECV_END_T = time.time()
+        self.recv_delay = self.RECV_END_T - self.RECV_START_T
         self.queue_delay = RECV_LAST_T - RECV_FIRST_T
 
-        AGG_START_T = time.time()
+        self.AGG_START_T = time.time()
         # optimizer conducts optimization (in this case, aggregation)
         global_weights = self.optimizer.do(
             deepcopy(self.weights), self.cache, total=total
@@ -247,13 +247,13 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
         self.weights = global_weights
         self.dataset_size = total
 
-        AGG_END_T = time.time()
-        self.agg_delay = AGG_END_T - AGG_START_T
+        self.AGG_END_T = time.time()
+        self.agg_delay = self.AGG_END_T - self.AGG_START_T
 
     def _send_weights(self, tag: str) -> None:
         logger.debug("calling _send_weights")
 
-        SEND_START_T = time.time()
+        self.SEND_START_T = time.time()
 
         channel = self.cm.get_by_tag(tag)
         if not channel:
@@ -277,8 +277,8 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
         channel.send(end, msg)
         logger.debug("sending weights done")
 
-        SEND_COMP_T = time.time()
-        self.send_delay = SEND_COMP_T - SEND_START_T
+        self.SEND_END_T = time.time()
+        self.send_delay = self.SEND_END_T - self.SEND_START_T
 
     def _send_dummy_weights(self, tag: str) -> None:
         channel = self.cm.get_by_tag(tag)
