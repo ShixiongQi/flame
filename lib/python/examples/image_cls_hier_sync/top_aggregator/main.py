@@ -147,7 +147,7 @@ class PyTorchFemnistAggregator(TopAggregator):
 
     def load_data(self) -> None:
         """Load a test dataset."""
-        LOAD_START_T = time.time()
+        self.LOAD_START_T = time.time()
 
         # Generate a random parition ID
         self.partition_id = random.randint(1, 11)
@@ -162,8 +162,8 @@ class PyTorchFemnistAggregator(TopAggregator):
 
         self.dataset = Dataset(dataloader=self.test_loader)
 
-        LOAD_END_T = time.time()
-        self.load_data_delay = LOAD_END_T - LOAD_START_T
+        self.LOAD_END_T = time.time()
+        self.load_data_delay = self.LOAD_END_T - self.LOAD_START_T
 
     def train(self) -> None:
         """Train a model."""
@@ -172,10 +172,10 @@ class PyTorchFemnistAggregator(TopAggregator):
 
     def evaluate(self) -> None:
         """Evaluate (test) a model."""
-        EVAL_START_T = time.time()
+        self.EVAL_START_T = time.time()
         test_loss, test_accuray, acc_5, testRes = test_pytorch_model(self.model, self.test_loader, device='cpu')
-        EVAL_END_T = time.time()
-        self.eval_delay = EVAL_END_T - EVAL_START_T
+        self.EVAL_END_T = time.time()
+        self.eval_delay = self.EVAL_END_T - self.EVAL_START_T
 
         self.current_round_time = time.time()
         logger.info(f"Wall-clock time: {self.current_round_time} ||"
@@ -194,6 +194,12 @@ class PyTorchFemnistAggregator(TopAggregator):
                     f"MSG (from mid) Ave. delay: {sum(self.msg_from_mid_delays)/len(self.msg_from_mid_delays):.4f} || "
                     f"Total cache delay: {sum(self.cache_delays):.4f} || "
                     f"Ave. cache delay: {sum(self.cache_delays)/len(self.cache_delays):.4f}")
+
+        logger.info(f"Top Aggregator Timestamps: "
+                    f"CACHE_START_T: {self.CACHE_START_T}, CACHE_END_T: {self.CACHE_END_T} || "
+                    f"AGG_START_T: {self.AGG_START_T}, AGG_END_T: {self.AGG_END_T} || "
+                    f"EVAL_START_T: {self.EVAL_START_T}, EVAL_END_T: {self.EVAL_END_T} || "
+                    f"LOAD_START_T: {self.LOAD_START_T}, LOAD_END_T: {self.LOAD_END_T}")
 
         self.previous_round_time = self.current_round_time
 

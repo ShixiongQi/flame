@@ -89,7 +89,7 @@ class PyTorchFemnistTrainer(Trainer):
 
     def load_data(self) -> None:
         """Load data."""
-        m_start_t = time.time()
+        self.LOAD_START_T = time.time()
 
         # Generate a random parition ID
         self.partition_id = random.randint(1, 3399)
@@ -102,12 +102,12 @@ class PyTorchFemnistTrainer(Trainer):
                 shuffle=True, pin_memory=True, timeout=0,
                 num_workers=0, drop_last=True)
 
-        m_end_t = time.time()
-        self.load_data_delay = m_end_t - m_start_t
+        self.LOAD_END_T = time.time()
+        self.load_data_delay = self.LOAD_END_T - self.LOAD_START_T
 
     def train(self) -> None:
         """Train a model."""
-        m_start_t = time.time()
+        self.TRAIN_START_T = time.time()
 
         self.optimizer = optim.Adadelta(self.model.parameters())
 
@@ -117,8 +117,8 @@ class PyTorchFemnistTrainer(Trainer):
         # save dataset size so that the info can be shared with aggregator
         self.dataset_size = len(self.train_loader.dataset)
 
-        m_end_t = time.time()
-        self.local_training_delay = m_end_t - m_start_t
+        self.TRAIN_END_T = time.time()
+        self.local_training_delay = self.TRAIN_END_T - self.TRAIN_START_T
 
     def _train_epoch(self, epoch):
         self.model.train()
@@ -176,6 +176,13 @@ class PyTorchFemnistTrainer(Trainer):
                     f"Fetch task delay: {self.fetch_delay:.4f} || "
                     f"MSG delay: {self.msg_delay:.4f} || "
                     f"Send task delay: {self.send_delay:.4f}")
+
+        logger.info(f"Trainer ({self.config.task_id}) Timestamps: "
+                    f"MSG_START_T: {self.MSG_START_T}, MSG_END_T: {self.MSG_END_T} || "
+                    f"TRAIN_START_T: {self.TRAIN_START_T}, TRAIN_END_T: {self.TRAIN_END_T} || "
+                    f"LOAD_START_T: {self.LOAD_START_T}, LOAD_END_T: {self.LOAD_END_T} || "
+                    f"FETCH_START_T: {self.FETCH_START_T}, FETCH_END_T: {self.FETCH_END_T} || "
+                    f"SEND_START_T: {self.SEND_START_T}, SEND_END_T: {self.SEND_END_T}")
 
     @override
     def compose(self) -> None:

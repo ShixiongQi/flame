@@ -115,7 +115,7 @@ class Trainer(Role, metaclass=ABCMeta):
     def _fetch_weights(self, tag: str) -> None:
         logger.debug("calling _fetch_weights")
 
-        FETCH_START_T = time.time()
+        self.FETCH_START_T = time.time()
 
         self.fetch_success = False
         channel = self.cm.get_by_tag(tag)
@@ -165,10 +165,10 @@ class Trainer(Role, metaclass=ABCMeta):
         self.fetch_success = True
         logger.debug(f"work_done: {self._work_done}, round: {self._round}")
 
-        FETCH_SUCCESS_T = time.time()
+        self.FETCH_END_T = time.time()
 
-        self.msg_delay = FETCH_SUCCESS_T - self.MSG_SENT_T
-        self.fetch_delay = FETCH_SUCCESS_T - FETCH_START_T
+        self.msg_delay = self.FETCH_END_T - self.MSG_SENT_T
+        self.fetch_delay = self.FETCH_END_T - self.FETCH_START_T
 
     def put(self, tag: str) -> None:
         """Set data to remote role(s)."""
@@ -178,7 +178,7 @@ class Trainer(Role, metaclass=ABCMeta):
     def _send_weights(self, tag: str) -> None:
         logger.debug("calling _send_weights")
 
-        SEND_START_T = time.time()
+        self.SEND_START_T = time.time()
 
         channel = self.cm.get_by_tag(tag)
         if not channel:
@@ -207,8 +207,8 @@ class Trainer(Role, metaclass=ABCMeta):
         channel.send(end, msg)
         logger.debug("sending weights done")
 
-        SEND_SUCCESS_T = time.time()
-        self.send_delay = SEND_SUCCESS_T - SEND_START_T
+        self.SEND_END_T = time.time()
+        self.send_delay = self.SEND_END_T - self.SEND_START_T
 
     def save_metrics(self):
         """Save metrics in a model registry."""

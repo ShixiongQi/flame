@@ -159,7 +159,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
         if not channel:
             return
 
-        RECV_START_T = time.time()
+        self.RECV_START_T = time.time()
 
         total = 0
         self.N_ENDS = len(channel.ends())
@@ -204,7 +204,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
             self.msg_from_mid_delays.append(time.time() - self.MSG_SENT_T)
 
-            CACHE_START_T = time.time()
+            self.CACHE_START_T = time.time()
             if ENABLE_NOISE:
                 start_duplication_cpu_time = psutil.cpu_times()
 
@@ -224,16 +224,16 @@ class TopAggregator(Role, metaclass=ABCMeta):
                     tres = TrainResult(weights, count)
                     # save training result from trainer in a disk cache
                     self.cache[end] = tres
-            CACHE_END_T = time.time()
-            self.cache_delays.append(CACHE_END_T - CACHE_START_T)
+            self.CACHE_END_T = time.time()
+            self.cache_delays.append(self.CACHE_END_T - self.CACHE_START_T)
 
         logger.debug(f"received {len(self.cache)} trainer updates in cache")
 
-        RECV_COMP_T = time.time()
-        self.recv_delay = RECV_COMP_T - RECV_START_T
+        self.RECV_END_T = time.time()
+        self.recv_delay = self.RECV_END_T - self.RECV_START_T
         self.queue_delay = RECV_LAST_T - RECV_FIRST_T
 
-        AGG_START_T = time.time()
+        self.AGG_START_T = time.time()
         # optimizer conducts optimization (in this case, aggregation)
         global_weights = self.optimizer.do(
             deepcopy(self.weights),
@@ -252,8 +252,8 @@ class TopAggregator(Role, metaclass=ABCMeta):
         # update model with global weights
         self._update_model()
 
-        AGG_END_T = time.time()
-        self.agg_delay = AGG_END_T - AGG_START_T
+        self.AGG_END_T = time.time()
+        self.agg_delay = self.AGG_END_T - self.AGG_START_T
 
         end_cpu_time = psutil.cpu_times() # process.cpu_times()
 
@@ -274,7 +274,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
             self._distribute_weights(tag)
 
     def _distribute_weights(self, tag: str) -> None:
-        DIST_START_T = time.time()
+        self.DIST_START_T = time.time()
 
         channel = self.cm.get_by_tag(tag)
         if not channel:
@@ -309,8 +309,8 @@ class TopAggregator(Role, metaclass=ABCMeta):
                 end, PROP_ROUND_START_TIME, (round, datetime.now())
             )
         
-        DIST_END_T = time.time()
-        self.dist_delay = DIST_END_T - DIST_START_T
+        self.DIST_END_T = time.time()
+        self.dist_delay = self.DIST_END_T - self.DIST_START_T
 
     def inform_end_of_training(self) -> None:
         """Inform all the trainers that the training is finished."""
