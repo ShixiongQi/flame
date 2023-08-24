@@ -307,20 +307,6 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
 
         # set necessary properties to help channel decide how to select ends
         channel.set_property("round", self._round)
-
-        logger.info(f"Wall-clock time: {time.time()} || "
-                    f"Round: {self._round} || "
-                    f"#TRs: {self.N_ENDS} || "
-                    f"Agg delay (s): {self.agg_delay:.4f} || "
-                    f"Fetch task delay: {self.fetch_delay:.4f} || "
-                    f"DIST task delay: {self.dist_delay:.4f} || "
-                    f"RECV task delay: {self.recv_delay:.4f} || "
-                    f"SEND task delay: {self.send_delay:.4f} || "
-                    f"Queueing delay: {self.queue_delay:.4f} || "
-                    f"MSG (from top) delay: {self.msg_from_top_delay:.4f} || "
-                    f"MSG (from trainer) Ave. delay: {sum(self.msg_from_tr_delays)/len(self.msg_from_tr_delays):.4f} || "
-                    f"Total cache delay: {sum(self.cache_delays):.4f} || "
-                    f"Ave. cache delay: {sum(self.cache_delays)/len(self.cache_delays):.4f}")
         
     def inform_end_of_training(self) -> None:
         """Inform all the trainers that the training is finished."""
