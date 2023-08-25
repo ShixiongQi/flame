@@ -230,7 +230,7 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
         logger.debug(f"received {len(self.cache)} trainer updates in cache")
 
         self.MSG_TrM_START_T = min(self.MSG_TrM_START_Ts)
-        self.MSG_TrM_END_T = RECV_LAST_T
+        self.MSG_TrM_END_T = time.time() # RECV_LAST_T
         self.RECV_END_T = time.time()
         self.recv_delay = self.RECV_END_T - self.RECV_START_T
         self.queue_delay = RECV_LAST_T - RECV_FIRST_T
