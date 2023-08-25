@@ -129,6 +129,7 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
         # one aggregator is sufficient
         end = channel.one_end()
         msg, _ = channel.recv(end)
+        self.MSG_ToM_END_T = time.time()
 
         if MessageType.WEIGHTS in msg:
             self.weights = msg[MessageType.WEIGHTS]
@@ -140,11 +141,11 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
             self._round = msg[MessageType.ROUND]
 
         if MessageType.SEND_TIMESTAMP in msg:
-            self.MSG_SENT_T = msg[MessageType.SEND_TIMESTAMP]
+            self.MSG_ToM_START_T = msg[MessageType.SEND_TIMESTAMP]
 
         self.FETCH_END_T = time.time()
 
-        self.msg_from_top_delay = self.FETCH_END_T - self.MSG_SENT_T
+        self.msg_from_top_delay = self.MSG_ToM_END_T - self.MSG_ToM_START_T
         self.fetch_delay = self.FETCH_END_T - self.FETCH_START_T
 
     def _distribute_weights(self, tag: str) -> None:
@@ -190,6 +191,7 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
         self.cache_delays = []
         RECV_FIRST_T = time.time() # Init. time to receive first update
         RECV_LAST_T = time.time() # Init. time to receive last update
+        self.MSG_TrM_START_Ts = []
         # receive local model parameters from trainers
         for msg, metadata in channel.recv_fifo(channel.ends()):
             if total == 0:
@@ -209,11 +211,12 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
                 count = msg[MessageType.DATASET_SIZE]
 
             if MessageType.SEND_TIMESTAMP in msg:
-                self.MSG_SENT_T = msg[MessageType.SEND_TIMESTAMP]
+                self.MSG_START_T = msg[MessageType.SEND_TIMESTAMP]
 
             logger.debug(f"{end}'s parameters trained with {count} samples")
 
-            self.msg_from_tr_delays.append(time.time() - self.MSG_SENT_T)
+            self.MSG_TrM_START_Ts.append(self.MSG_START_T)
+            self.msg_from_tr_delays.append(time.time() - self.MSG_START_T)
 
             self.CACHE_START_T = time.time()
             if weights is not None and count > 0:
@@ -226,6 +229,8 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
 
         logger.debug(f"received {len(self.cache)} trainer updates in cache")
 
+        self.MSG_TrM_START_T = min(self.MSG_TrM_START_Ts)
+        self.MSG_TrM_END_T = RECV_LAST_T
         self.RECV_END_T = time.time()
         self.recv_delay = self.RECV_END_T - self.RECV_START_T
         self.queue_delay = RECV_LAST_T - RECV_FIRST_T

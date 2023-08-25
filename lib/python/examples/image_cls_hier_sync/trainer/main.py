@@ -182,7 +182,7 @@ class PyTorchFemnistTrainer(Trainer):
                     f"LOAD, LOAD_START_T: {self.LOAD_START_T}, LOAD_END_T: {self.LOAD_END_T} || "
                     f"FETCH, FETCH_START_T: {self.FETCH_START_T}, FETCH_END_T: {self.FETCH_END_T} || "
                     f"SEND, SEND_START_T: {self.SEND_START_T}, SEND_END_T: {self.SEND_END_T} || "
-                    f"MSG, MSG_START_T: {self.MSG_START_T}, MSG_END_T: {self.MSG_END_T}")
+                    f"MSG_MTr, MSG_MTr_START_T: {self.MSG_MTr_START_T}, MSG_MTr_END_T: {self.MSG_MTr_END_T}")
 
     @override
     def compose(self) -> None:

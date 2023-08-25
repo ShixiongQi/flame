@@ -90,7 +90,9 @@ class TorchMnistMiddleAggregator(MiddleAggregator):
                     f"FETCH, FETCH_START_T: {self.FETCH_START_T}, FETCH_END_T: {self.FETCH_END_T} || "
                     f"SEND, SEND_START_T: {self.SEND_START_T}, SEND_END_T: {self.SEND_END_T} || "
                     f"DIST, DIST_START_T: {self.DIST_START_T}, DIST_END_T: {self.DIST_END_T} || "
-                    f"RECV, RECV_START_T: {self.RECV_START_T}, RECV_END_T: {self.RECV_END_T}")
+                    f"RECV, RECV_START_T: {self.RECV_START_T}, RECV_END_T: {self.RECV_END_T} || "
+                    f"MSG_ToM, MSG_ToM_START_T: {self.MSG_ToM_START_T}, MSG_ToM_END_T: {self.MSG_ToM_END_T} ||"
+                    f"MSG_TrM, MSG_TrM_START_T: {self.MSG_TrM_START_T}, MSG_TrM_END_T: {self.MSG_TrM_END_T}")
 
 if __name__ == "__main__":
     import argparse

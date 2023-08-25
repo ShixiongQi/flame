@@ -167,6 +167,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
         self.cache_delays = []
         RECV_FIRST_T = time.time() # Init. time to receive first update
         RECV_LAST_T = time.time() # Init. time to receive last update
+        self.MSG_MTo_START_Ts = []
         start_cpu_time = psutil.cpu_times()
         # receive local model parameters from trainers
         for msg, metadata in channel.recv_fifo(channel.ends()):
@@ -198,11 +199,12 @@ class TopAggregator(Role, metaclass=ABCMeta):
                 )
 
             if MessageType.SEND_TIMESTAMP in msg:
-                self.MSG_SENT_T = msg[MessageType.SEND_TIMESTAMP]
+                self.MSG_START_T = msg[MessageType.SEND_TIMESTAMP]
 
             logger.debug(f"{end}'s parameters trained with {count} samples")
 
-            self.msg_from_mid_delays.append(time.time() - self.MSG_SENT_T)
+            self.msg_from_mid_delays.append(time.time() - self.MSG_START_T)
+            self.MSG_MTo_START_Ts.append(self.MSG_START_T)
 
             self.CACHE_START_T = time.time()
             if ENABLE_NOISE:
@@ -229,6 +231,8 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
         logger.debug(f"received {len(self.cache)} trainer updates in cache")
 
+        self.MSG_MTo_START_T = min(self.MSG_MTo_START_Ts)
+        self.MSG_MTo_END_T = RECV_LAST_T
         self.RECV_END_T = time.time()
         self.recv_delay = self.RECV_END_T - self.RECV_START_T
         self.queue_delay = RECV_LAST_T - RECV_FIRST_T

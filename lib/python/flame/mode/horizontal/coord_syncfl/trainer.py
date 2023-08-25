@@ -70,7 +70,7 @@ class Trainer(BaseTrainer):
         channel.await_join()
 
         msg, _ = channel.recv(self.aggregator_id)
-        self.MSG_END_T = time.time()
+        self.MSG_MTr_END_T = time.time()
 
         if MessageType.WEIGHTS in msg:
             logger.debug("received model weights")
@@ -84,14 +84,14 @@ class Trainer(BaseTrainer):
             self._round = msg[MessageType.ROUND]
 
         if MessageType.SEND_TIMESTAMP in msg:
-            self.MSG_START_T = msg[MessageType.SEND_TIMESTAMP]
+            self.MSG_MTr_START_T = msg[MessageType.SEND_TIMESTAMP]
 
         self.fetch_success = True
         logger.debug(f"work_done: {self._work_done}, round: {self._round}")
 
         self.FETCH_END_T = time.time()
 
-        self.msg_delay = self.MSG_END_T - self.MSG_START_T
+        self.msg_delay = self.MSG_MTr_END_T - self.MSG_MTr_START_T
         self.fetch_delay = self.FETCH_END_T - self.FETCH_START_T
 
     def _send_weights(self, tag: str) -> None:
