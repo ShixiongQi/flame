@@ -30,6 +30,9 @@ from flame.config import GROUPBY_DEFAULT_GROUP
 from flame.end import KEY_END_STATE, VAL_END_STATE_RECVD, End
 from flame.mode.role import Role
 
+import psutil, cProfile
+import time
+
 logger = logging.getLogger(__name__)
 
 KEY_CH_STATE = "state"
@@ -194,7 +197,17 @@ class Channel(object):
         """Broadcast a message in a blocking call fashion."""
 
         async def _put():
+            START_DUMP_T = time.process_time()
+
             payload = cloudpickle.dumps(message)
+
+            END_DUMP_T = time.process_time()
+
+            CPU_TIME = END_DUMP_T - START_DUMP_T
+            print(f"[Broadcast][DUMP] CPU time: {CPU_TIME} seconds")
+            # cpu_utilization = 100.0 * (1.0 - IDLE_TIME / CPU_TIME) * psutil.cpu_count(logical=True)
+            # print(f"[Broadcast][DUMP] CPU time: {CPU_TIME} seconds; CPU Utilization: {cpu_utilization}%")
+
             self.mc.accumulate("bytes", "broadcast", len(payload))
             await self._bcast_queue.put(payload)
 
@@ -208,7 +221,26 @@ class Channel(object):
                 # can't send message to end_id
                 return
 
+            START_DUMP_T = time.process_time()
+
             payload = cloudpickle.dumps(message)
+            '''
+            def profiled_code():
+                payload = cloudpickle.dumps(message)
+                return payload
+            
+            profiler = cProfile.Profile()
+            payload = profiler.runcall(profiled_code)
+            profiler.print_stats()
+            '''
+
+            END_DUMP_T = time.process_time()
+
+            CPU_TIME = END_DUMP_T - START_DUMP_T
+            print(f"[Send][DUMP] CPU time: {CPU_TIME} seconds")
+            # cpu_utilization = 100.0 * (1.0 - IDLE_TIME / CPU_TIME) * psutil.cpu_count(logical=True)
+            # print(f"[send][DUMP] CPU time: {CPU_TIME} seconds; CPU Utilization: {cpu_utilization}%")
+
             self.mc.accumulate("bytes", "send", len(payload))
             logger.debug(f"length of payload = {len(payload)}")
             await self._ends[end_id].put(payload)
@@ -243,12 +275,21 @@ class Channel(object):
             # set a property that says a message was received for the end
             self._ends[end_id].set_property(KEY_END_STATE, VAL_END_STATE_RECVD)
 
+        START_DUMP_T = time.process_time()
+
         # dissect the payload into msg and timestamp
         msg, timestamp = (
             (cloudpickle.loads(payload[0]), payload[1])
             if payload and status
             else (None, None)
         )
+
+        END_DUMP_T = time.process_time()
+
+        CPU_TIME = END_DUMP_T - START_DUMP_T
+        print(f"[Recv][DUMP] CPU time: {CPU_TIME} seconds")
+        # cpu_utilization = 100.0 * (1.0 - IDLE_TIME / CPU_TIME) * psutil.cpu_count(logical=True)
+        # print(f"[recv][DUMP] CPU time: {CPU_TIME} seconds; CPU Utilization: {cpu_utilization}%")
 
         # set cleanup ready event
         self._backend.set_cleanup_ready(end_id)
@@ -317,11 +358,21 @@ class Channel(object):
             else:
                 logger.debug(f"channel has no end id {end_id} for msg")
 
+            START_DUMP_T = time.process_time()
+
             msg, timestamp = (
                 (cloudpickle.loads(payload[0]), payload[1])
                 if payload and status
                 else (None, None)
             )
+
+            END_DUMP_T = time.process_time()
+
+            CPU_TIME = END_DUMP_T - START_DUMP_T
+            print(f"[recv_fifo][DUMP] CPU time: {CPU_TIME} seconds")
+            # cpu_utilization = 100.0 * (1.0 - IDLE_TIME / CPU_TIME) * psutil.cpu_count(logical=True)
+            # print(f"[recv_fifo][DUMP] CPU time: {CPU_TIME} seconds; CPU Utilization: {cpu_utilization}%")
+
             metadata = (end_id, timestamp)
 
             # set cleanup ready event
@@ -424,11 +475,20 @@ class Channel(object):
 
         payload, status = run_async(_peek(), self._backend.loop())
 
+        START_DUMP_T = time.process_time()
+
         msg, timestamp = (
             (cloudpickle.loads(payload[0]), payload[1])
             if payload and status
             else (None, None)
         )
+
+        END_DUMP_T = time.process_time()
+
+        CPU_TIME = END_DUMP_T - START_DUMP_T
+        print(f"[peek][DUMP] CPU time: {CPU_TIME} seconds")
+        # cpu_utilization = 100.0 * (1.0 - IDLE_TIME / CPU_TIME) * psutil.cpu_count(logical=True)
+        # print(f"[peek][DUMP] CPU time: {CPU_TIME} seconds; CPU Utilization: {cpu_utilization}%")
 
         return msg, timestamp
 

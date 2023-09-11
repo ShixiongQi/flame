@@ -269,7 +269,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
             idle_time_diff = end_cpu_time.idle - start_cpu_time.idle
 
         self.utilization = 100.0 * (1.0 - idle_time_diff / self.cpu_time) * psutil.cpu_count(logical=True)
-        # logger.info(f"CPU time: {self.cpu_time} || CPU utilization: {self.utilization}")
+        logger.info(f"CPU time: {self.cpu_time} || CPU utilization: {self.utilization}")
 
     def put(self, tag: str) -> None:
         """Set data to remote role(s)."""
