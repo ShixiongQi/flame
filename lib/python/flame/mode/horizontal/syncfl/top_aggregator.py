@@ -203,7 +203,11 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
             logger.debug(f"{end}'s parameters trained with {count} samples")
 
-            self.msg_from_mid_delays.append(time.time() - self.MSG_START_T)
+            MSG_TRANSFER_TIME = time.time() - self.MSG_START_T
+
+            print(f"MSG_TRANSFER_TIME: {MSG_TRANSFER_TIME}")
+
+            self.msg_from_mid_delays.append(MSG_TRANSFER_TIME)
             self.MSG_MTo_START_Ts.append(self.MSG_START_T)
 
             self.CACHE_START_T = time.time()

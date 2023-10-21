@@ -136,7 +136,9 @@ class PyTorchFemnistAggregator(TopAggregator):
         """Initialize role."""
         self.device = "cpu" # torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.model = tormodels.__dict__["resnet152"](num_classes=62).to(device=self.device)
+        self.model = tormodels.__dict__["resnet18"](num_classes=62).to(self.device)
+        # self.model = tormodels.__dict__["resnet34"](num_classes=62).to(self.device)
+        # self.model = tormodels.__dict__["resnet152"](num_classes=62).to(self.device)
 
 
     def load_data(self) -> None:
@@ -165,7 +167,7 @@ class PyTorchFemnistAggregator(TopAggregator):
 
         test_loss, test_accuray, acc_5, testRes = test_pytorch_model(self.model, self.test_loader, device='cpu')
 
-        logger.info(f"Wall-clock time: {time.time()} || Test loss: {test_loss} || Test accuracy: {test_accuray} || CPU time: {self.cpu_time} || CPU utilization: {self.utilization}")
+        # logger.info(f"Wall-clock time: {time.time()} || Test loss: {test_loss} || Test accuracy: {test_accuray} || CPU time: {self.cpu_time} || CPU utilization: {self.utilization}")
 
         # update metrics after each evaluation so that the metrics can be
         # logged in a model registry.
