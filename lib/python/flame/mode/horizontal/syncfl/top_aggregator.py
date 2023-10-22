@@ -231,6 +231,9 @@ class TopAggregator(Role, metaclass=ABCMeta):
                     # save training result from trainer in a disk cache
                     self.cache[end] = tres
             self.CACHE_END_T = time.time()
+
+            print(f"CACHE_TIME: {self.CACHE_END_T - self.CACHE_START_T}")
+
             self.cache_delays.append(self.CACHE_END_T - self.CACHE_START_T)
 
         logger.debug(f"received {len(self.cache)} trainer updates in cache")
