@@ -52,6 +52,7 @@ TAG_AGGREGATE = "aggregate"
 PROP_ROUND_START_TIME = "round_start_time"
 PROP_ROUND_END_TIME = "round_end_time"
 
+MEASURE_SHM = 1
 ENABLE_NOISE = False
 num_duplication = 1
 custom_temp_dir = "/mydata/tmp"
@@ -225,11 +226,12 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
                 end_duplication_cpu_time = psutil.cpu_times()
             else:
-                if weights is not None and count > 0:
-                    total += count
-                    tres = TrainResult(weights, count)
-                    # save training result from trainer in a disk cache
-                    self.cache[end] = tres
+                if MEASURE_SHM == 1:
+                    if weights is not None and count > 0:
+                        total += count
+                        tres = TrainResult(weights, count)
+                        # save training result from trainer in a disk cache
+                        self.cache[end] = tres
             self.CACHE_END_T = time.time()
 
             print(f"CACHE_TIME: {self.CACHE_END_T - self.CACHE_START_T}")
@@ -245,20 +247,9 @@ class TopAggregator(Role, metaclass=ABCMeta):
         self.queue_delay = RECV_LAST_T - RECV_FIRST_T
 
         self.AGG_START_T = time.time()
-        # optimizer conducts optimization (in this case, aggregation)
-        global_weights = self.optimizer.do(
-            deepcopy(self.weights),
-            self.cache,
-            total=total,
-            num_trainers=len(channel.ends()),
-        )
-        if global_weights is None:
-            logger.debug("failed model aggregation")
-            time.sleep(1)
-            return
 
         # set global weights
-        self.weights = global_weights
+        self.weights = weights
 
         # update model with global weights
         self._update_model()
