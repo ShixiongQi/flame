@@ -16,7 +16,7 @@
 """honrizontal FL middle level aggregator."""
 
 import logging
-import time
+import time, os, tempfile
 from copy import deepcopy
 
 from diskcache import Cache
@@ -48,6 +48,10 @@ TAG_UPLOAD = "upload"
 # 60 second wait time until a trainer appears in a channel
 WAIT_TIME_FOR_TRAINER = 60
 
+mid_to_top_dir = "/mydata/mid_to_top_dir"
+top_to_mid_dir = "/mydata/top_to_mid_dir"
+top_local_dir = "/mydata/top_local_dir"
+mid_local_dir = "/mydata/mid_local_dir"
 
 class MiddleAggregator(Role, metaclass=ABCMeta):
     """Middle level aggregator.
@@ -77,9 +81,34 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
 
         # disk cache is used for saving memory in case model is large
         # automatic eviction of disk cache is disabled with cull_limit 0
-        self.cache = Cache()
-        self.cache.reset("size_limit", 1e15)
-        self.cache.reset("cull_limit", 0)
+
+        if not os.path.exists(mid_to_top_dir):
+            os.makedirs(mid_to_top_dir)
+        temp_dir = tempfile.TemporaryDirectory(dir=mid_to_top_dir)
+        self.mid_to_top_cache = Cache(directory=temp_dir.name)
+        self.mid_to_top_cache.reset("size_limit", 1e15)
+        self.mid_to_top_cache.reset("cull_limit", 0)
+
+        if not os.path.exists(top_to_mid_dir):
+            os.makedirs(top_to_mid_dir)
+        temp_dir = tempfile.TemporaryDirectory(dir=top_to_mid_dir)
+        self.top_to_mid_cache = Cache(directory=temp_dir.name)
+        self.top_to_mid_cache.reset("size_limit", 1e15)
+        self.top_to_mid_cache.reset("cull_limit", 0)
+
+        if not os.path.exists(top_local_dir):
+            os.makedirs(top_local_dir)
+        temp_dir = tempfile.TemporaryDirectory(dir=top_local_dir)
+        self.top_local_cache = Cache(directory=temp_dir.name)
+        self.top_local_cache.reset("size_limit", 1e15)
+        self.top_local_cache.reset("cull_limit", 0)
+
+        if not os.path.exists(mid_local_dir):
+            os.makedirs(mid_local_dir)
+        temp_dir = tempfile.TemporaryDirectory(dir=mid_local_dir)
+        self.mid_local_cache = Cache(directory=temp_dir.name)
+        self.mid_local_cache.reset("size_limit", 1e15)
+        self.mid_local_cache.reset("cull_limit", 0)
 
         self.dataset_size = 0
 
@@ -223,13 +252,16 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
                 total += count
                 tres = TrainResult(weights, count)
                 # save training result from trainer in a disk cache
-                self.cache[end] = tres
+                self.mid_local_cache[end] = tres
             self.CACHE_END_T = time.time()
             self.cache_delays.append(self.CACHE_END_T - self.CACHE_START_T)
 
-        logger.debug(f"received {len(self.cache)} trainer updates in cache")
+        logger.debug(f"received {len(self.mid_local_cache)} trainer updates in cache")
 
-        self.MSG_TrM_START_T = min(self.MSG_TrM_START_Ts)
+        if len(self.MSG_TrM_START_Ts) > 0:
+            self.MSG_TrM_START_T = min(self.MSG_TrM_START_Ts)
+        else:
+            self.MSG_TrM_START_T = time.time()
         self.MSG_TrM_END_T = time.time() # RECV_LAST_T
         self.RECV_END_T = time.time()
         self.recv_delay = self.RECV_END_T - self.RECV_START_T
@@ -238,7 +270,7 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
         self.AGG_START_T = time.time()
         # optimizer conducts optimization (in this case, aggregation)
         global_weights = self.optimizer.do(
-            deepcopy(self.weights), self.cache, total=total
+            deepcopy(self.weights), self.mid_local_cache, total=total
         )
         if global_weights is None:
             logger.debug("failed model aggregation")
@@ -254,6 +286,16 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
 
         self.AGG_END_T = time.time()
         self.agg_delay = self.AGG_END_T - self.AGG_START_T
+
+        # Write Local Model to Cache
+        print(f"mid aggregator ID: {self.config.task_id}")
+
+        self.SHM_W_START_T = time.time()
+        self.mid_to_top_cache[self.config.task_id] = self.weights
+        print(f"SHM_W delay: {time.time() - self.SHM_W_START_T} || Cache Size: {len(self.mid_to_top_cache)}")
+
+        tmp_weights = self.top_to_mid_cache["49d06b7526964db86cf37c70e8e0cdb6bd7aa701"]
+        print(tmp_weights)
 
     def _send_weights(self, tag: str) -> None:
         logger.debug("calling _send_weights")

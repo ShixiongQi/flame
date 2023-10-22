@@ -54,7 +54,10 @@ PROP_ROUND_END_TIME = "round_end_time"
 
 ENABLE_NOISE = False
 num_duplication = 1
-custom_temp_dir = "/mydata/tmp"
+mid_to_top_dir = "/mydata/mid_to_top_dir"
+top_to_mid_dir = "/mydata/top_to_mid_dir"
+top_local_dir = "/mydata/top_local_dir"
+mid_local_dir = "/mydata/mid_local_dir"
 
 class TopAggregator(Role, metaclass=ABCMeta):
     """Top level Aggregator implements an ML aggregation role."""
@@ -99,12 +102,34 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
         # disk cache is used for saving memory in case model is large
         # automatic eviction of disk cache is disabled with cull_limit 0
-        if not os.path.exists(custom_temp_dir):
-            os.makedirs(custom_temp_dir)
-        temp_dir = tempfile.TemporaryDirectory(dir=custom_temp_dir)
-        self.cache = Cache(directory=temp_dir.name)
-        self.cache.reset("size_limit", 1e15)
-        self.cache.reset("cull_limit", 0)
+
+        if not os.path.exists(mid_to_top_dir):
+            os.makedirs(mid_to_top_dir)
+        temp_dir = tempfile.TemporaryDirectory(dir=mid_to_top_dir)
+        self.mid_to_top_cache = Cache(directory=temp_dir.name)
+        self.mid_to_top_cache.reset("size_limit", 1e15)
+        self.mid_to_top_cache.reset("cull_limit", 0)
+
+        if not os.path.exists(top_to_mid_dir):
+            os.makedirs(top_to_mid_dir)
+        temp_dir = tempfile.TemporaryDirectory(dir=top_to_mid_dir)
+        self.top_to_mid_cache = Cache(directory=temp_dir.name)
+        self.top_to_mid_cache.reset("size_limit", 1e15)
+        self.top_to_mid_cache.reset("cull_limit", 0)
+
+        if not os.path.exists(top_local_dir):
+            os.makedirs(top_local_dir)
+        temp_dir = tempfile.TemporaryDirectory(dir=top_local_dir)
+        self.top_local_cache = Cache(directory=temp_dir.name)
+        self.top_local_cache.reset("size_limit", 1e15)
+        self.top_local_cache.reset("cull_limit", 0)
+
+        if not os.path.exists(mid_local_dir):
+            os.makedirs(mid_local_dir)
+        temp_dir = tempfile.TemporaryDirectory(dir=mid_local_dir)
+        self.mid_local_cache = Cache(directory=temp_dir.name)
+        self.mid_local_cache.reset("size_limit", 1e15)
+        self.mid_local_cache.reset("cull_limit", 0)
 
         self.optimizer = optimizer_provider.get(
             self.config.optimizer.sort, **self.config.optimizer.kwargs
@@ -217,7 +242,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
                         total += count
                         tres = TrainResult(tmp_weights, count)
                         # save training result from trainer in a disk cache
-                        self.cache[str(i)] = tres
+                        self.top_local_cache[str(i)] = tres
 
                 end_duplication_cpu_time = psutil.cpu_times()
             else:
@@ -225,13 +250,17 @@ class TopAggregator(Role, metaclass=ABCMeta):
                     total += count
                     tres = TrainResult(weights, count)
                     # save training result from trainer in a disk cache
-                    self.cache[end] = tres
+                    self.top_local_cache[end] = tres
             self.CACHE_END_T = time.time()
             self.cache_delays.append(self.CACHE_END_T - self.CACHE_START_T)
 
-        logger.debug(f"received {len(self.cache)} trainer updates in cache")
+        logger.debug(f"received {len(self.top_local_cache)} trainer updates in cache")
 
-        self.MSG_MTo_START_T = min(self.MSG_MTo_START_Ts)
+        if len(self.MSG_MTo_START_Ts) > 0:
+            self.MSG_MTo_START_T = min(self.MSG_MTo_START_Ts)
+        else:
+            self.MSG_MTo_START_T = time.time()
+
         self.MSG_MTo_END_T = time.time() # RECV_LAST_T
         self.RECV_END_T = time.time()
         self.recv_delay = self.RECV_END_T - self.RECV_START_T
@@ -241,7 +270,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
         # optimizer conducts optimization (in this case, aggregation)
         global_weights = self.optimizer.do(
             deepcopy(self.weights),
-            self.cache,
+            self.top_local_cache,
             total=total,
             num_trainers=len(channel.ends()),
         )
@@ -270,6 +299,13 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
         self.utilization = 100.0 * (1.0 - idle_time_diff / self.cpu_time) * psutil.cpu_count(logical=True)
         # logger.info(f"CPU time: {self.cpu_time} || CPU utilization: {self.utilization}")
+
+        # Write Global Model to Cache
+        print(f"top aggregator ID: {self.config.task_id}")
+
+        self.SHM_W_START_T = time.time()
+        self.top_to_mid_cache[self.config.task_id] = self.weights
+        print(f"SHM_W delay: {time.time() - self.SHM_W_START_T} || Cache Size: {len(self.top_to_mid_cache)}")
 
     def put(self, tag: str) -> None:
         """Set data to remote role(s)."""
