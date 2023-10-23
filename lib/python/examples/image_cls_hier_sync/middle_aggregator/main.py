@@ -35,6 +35,7 @@ class TorchMnistMiddleAggregator(MiddleAggregator):
 
     def __init__(self, config: Config) -> None:
         """Initialize a class instance."""
+        self.INIT_START_T = time.time()
         self.config = config
 
         # Output logs
@@ -47,6 +48,8 @@ class TorchMnistMiddleAggregator(MiddleAggregator):
         pass
 
     def load_data(self) -> None:
+        self.INIT_END_T = time.time()
+        print(f"MD AGG startup delay: {self.INIT_END_T - self.INIT_START_T}")
         """Load a test dataset."""
         pass
 

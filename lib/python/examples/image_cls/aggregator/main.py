@@ -121,6 +121,7 @@ class PyTorchFemnistAggregator(TopAggregator):
 
     def __init__(self, config: Config) -> None:
         """Initialize a class instance."""
+        self.INIT_START_T = time.time()
         self.config = config
         self.model = None
         self.dataset: Dataset = None
@@ -136,9 +137,9 @@ class PyTorchFemnistAggregator(TopAggregator):
         """Initialize role."""
         self.device = "cpu" # torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.model = tormodels.__dict__["resnet18"](num_classes=62).to(self.device)
+        # self.model = tormodels.__dict__["resnet18"](num_classes=62).to(self.device)
         # self.model = tormodels.__dict__["resnet34"](num_classes=62).to(self.device)
-        # self.model = tormodels.__dict__["resnet152"](num_classes=62).to(self.device)
+        self.model = tormodels.__dict__["resnet152"](num_classes=62).to(self.device)
 
 
     def load_data(self) -> None:
@@ -156,6 +157,8 @@ class PyTorchFemnistAggregator(TopAggregator):
                 num_workers=0, drop_last=False)
 
         self.dataset = Dataset(dataloader=self.test_loader)
+
+        print(f"TOP AGG. startup delay: {time.time() - self.INIT_START_T}")
 
     def train(self) -> None:
         """Train a model."""

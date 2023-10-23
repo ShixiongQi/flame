@@ -205,7 +205,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
             MSG_TRANSFER_TIME = time.time() - self.MSG_START_T
 
-            print(f"MSG_TRANSFER_TIME: {MSG_TRANSFER_TIME}")
+            # print(f"MSG_TRANSFER_TIME: {MSG_TRANSFER_TIME}")
 
             self.msg_from_mid_delays.append(MSG_TRANSFER_TIME)
             self.MSG_MTo_START_Ts.append(self.MSG_START_T)
@@ -232,7 +232,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
                     self.cache[end] = tres
             self.CACHE_END_T = time.time()
 
-            print(f"CACHE_TIME: {self.CACHE_END_T - self.CACHE_START_T}")
+            # print(f"CACHE_TIME: {self.CACHE_END_T - self.CACHE_START_T}")
 
             self.cache_delays.append(self.CACHE_END_T - self.CACHE_START_T)
 
@@ -257,13 +257,16 @@ class TopAggregator(Role, metaclass=ABCMeta):
             time.sleep(1)
             return
 
+        self.AGG_END_T = time.time()
+        print(f"AGG_TIME: {self.AGG_END_T - self.AGG_START_T}")
+
         # set global weights
         self.weights = global_weights
 
         # update model with global weights
         self._update_model()
 
-        self.AGG_END_T = time.time()
+        
         self.agg_delay = self.AGG_END_T - self.AGG_START_T
 
         end_cpu_time = psutil.cpu_times() # process.cpu_times()
