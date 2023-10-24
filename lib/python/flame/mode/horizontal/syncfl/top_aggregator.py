@@ -168,7 +168,13 @@ class TopAggregator(Role, metaclass=ABCMeta):
         RECV_FIRST_T = time.time() # Init. time to receive first update
         RECV_LAST_T = time.time() # Init. time to receive last update
         self.MSG_MTo_START_Ts = []
-        start_cpu_time = psutil.cpu_times()
+
+        process_id = os.getpid()
+        process = psutil.Process(process_id)
+
+        start_cpu_time = process.cpu_times() #psutil.cpu_times()
+        CPU_TIME_START =  time.process_time()
+        START_T = time.time()
         # receive local model parameters from trainers
         for msg, metadata in channel.recv_fifo(channel.ends()):
             if total == 0:
@@ -205,7 +211,7 @@ class TopAggregator(Role, metaclass=ABCMeta):
 
             MSG_TRANSFER_TIME = time.time() - self.MSG_START_T
 
-            print(f"MSG_TRANSFER_TIME: {MSG_TRANSFER_TIME}")
+            # print(f"MSG_TRANSFER_TIME: {MSG_TRANSFER_TIME}")
 
             self.msg_from_mid_delays.append(MSG_TRANSFER_TIME)
             self.MSG_MTo_START_Ts.append(self.MSG_START_T)
@@ -266,17 +272,23 @@ class TopAggregator(Role, metaclass=ABCMeta):
         self.AGG_END_T = time.time()
         self.agg_delay = self.AGG_END_T - self.AGG_START_T
 
-        end_cpu_time = psutil.cpu_times() # process.cpu_times()
+        # end_cpu_time = psutil.cpu_times() 
+        end_cpu_time = process.cpu_times()
+        CPU_TIME_END =  time.process_time()
 
         if ENABLE_NOISE:
             self.cpu_time = sum(end_cpu_time) - sum(start_cpu_time) - (sum(end_duplication_cpu_time) - sum(start_duplication_cpu_time))
-            idle_time_diff = end_cpu_time.idle - start_cpu_time.idle - (end_duplication_cpu_time.idle - start_duplication_cpu_time.idle)
         else:
             self.cpu_time = sum(end_cpu_time) - sum(start_cpu_time)
-            idle_time_diff = end_cpu_time.idle - start_cpu_time.idle
 
-        self.utilization = 100.0 * (1.0 - idle_time_diff / self.cpu_time) * psutil.cpu_count(logical=True)
-        # logger.info(f"CPU time: {self.cpu_time} || CPU utilization: {self.utilization}")
+        cpu_time_process = process.cpu_times().user
+        END_T = time.time()
+
+        print(f"CPU time: {self.cpu_time}")
+        print(f"YET ANOTHER CPU time: {CPU_TIME_END - CPU_TIME_START}")
+        print(f"CPU time taken for the process: {cpu_time_process:.6f} seconds")
+        print(f"elapsed time: {END_T - START_T}")
+        print("")
 
     def put(self, tag: str) -> None:
         """Set data to remote role(s)."""

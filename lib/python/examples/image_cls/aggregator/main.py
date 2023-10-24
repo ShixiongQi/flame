@@ -136,14 +136,16 @@ class PyTorchFemnistAggregator(TopAggregator):
         """Initialize role."""
         self.device = "cpu" # torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.model = tormodels.__dict__["resnet18"](num_classes=62).to(self.device)
+        # self.model = tormodels.__dict__["resnet18"](num_classes=62).to(self.device)
         # self.model = tormodels.__dict__["resnet34"](num_classes=62).to(self.device)
-        # self.model = tormodels.__dict__["resnet152"](num_classes=62).to(self.device)
+        self.model = tormodels.__dict__["resnet152"](num_classes=62).to(self.device)
 
 
     def load_data(self) -> None:
         """Load a test dataset."""
+        pass
 
+        """
         # Generate a random parition ID
         self.partition_id = random.randint(1, 11)
 
@@ -156,6 +158,7 @@ class PyTorchFemnistAggregator(TopAggregator):
                 num_workers=0, drop_last=False)
 
         self.dataset = Dataset(dataloader=self.test_loader)
+        """
 
     def train(self) -> None:
         """Train a model."""
@@ -164,7 +167,9 @@ class PyTorchFemnistAggregator(TopAggregator):
 
     def evaluate(self) -> None:
         """Evaluate (test) a model."""
+        pass
 
+        """
         test_loss, test_accuray, acc_5, testRes = test_pytorch_model(self.model, self.test_loader, device='cpu')
 
         # logger.info(f"Wall-clock time: {time.time()} || Test loss: {test_loss} || Test accuracy: {test_accuray} || CPU time: {self.cpu_time} || CPU utilization: {self.utilization}")
@@ -175,6 +180,7 @@ class PyTorchFemnistAggregator(TopAggregator):
             'test-loss': test_loss,
             'test-accuracy': test_accuray
         })
+        """
 
     def compose(self) -> None:
         """Compose role with tasklets."""
