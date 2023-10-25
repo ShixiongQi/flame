@@ -162,6 +162,7 @@ class PyTorchFemnistAggregator(TopAggregator):
 
     def evaluate(self) -> None:
         """Evaluate (test) a model."""
+        EVAL_START_T = time.time()
 
         test_loss, test_accuray, acc_5, testRes = test_pytorch_model(self.model, self.test_loader, device='cpu')
 
@@ -173,6 +174,9 @@ class PyTorchFemnistAggregator(TopAggregator):
             'test-loss': test_loss,
             'test-accuracy': test_accuray
         })
+
+        EVAL_END_T = time.time()
+        print(f"Eval. time: {EVAL_END_T - EVAL_START_T}")
 
     def compose(self) -> None:
         """Compose role with tasklets."""

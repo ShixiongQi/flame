@@ -21,6 +21,7 @@ https://github.com/pytorch/examples/blob/master/mnist/main.py.
 
 import logging
 import random
+import time
 
 from flame.mode.composer import Composer
 from flame.mode.tasklet import Loop, Tasklet
@@ -94,6 +95,8 @@ class PyTorchFemnistTrainer(Trainer):
 
     def train(self) -> None:
         """Train a model."""
+        TRAIN_START_T = time.time()
+
         self.optimizer = optim.Adadelta(self.model.parameters())
 
         for epoch in range(1, self.epochs + 1):
@@ -101,6 +104,9 @@ class PyTorchFemnistTrainer(Trainer):
 
         # save dataset size so that the info can be shared with aggregator
         self.dataset_size = len(self.train_loader.dataset)
+
+        TRAIN_END_T = time.time()
+        print(f"Training time: {TRAIN_END_T - TRAIN_START_T}")
 
     def _train_epoch(self, epoch):
         self.model.train()
