@@ -15,11 +15,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """Google Speech horizontal FL trainer for PyTorch.
 
-Imported from https://github.com/SymbioticLab/FedScale/blob/master/fedscale/utils/models/specialized/resnet_speech.py
+The example below is implemented based on the following example from pytorch:
+https://github.com/pytorch/examples/blob/master/mnist/main.py.
 """
 
 import logging
 import random
+import time
+import math
+import os
 
 from flame.mode.composer import Composer
 from flame.mode.tasklet import Loop, Tasklet
@@ -32,15 +36,17 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data as data_utils
 from flame.config import Config
-from flame.mode.horizontal.trainer import Trainer
+from flame.mode.horizontal.coord_syncfl.trainer import Trainer
 from torchvision import datasets, transforms
+import torchvision.models as tormodels
 
-import math
+# from flame.fedscale_utils.femnist import FEMNIST
+from flame.fedscale_utils.utils_data import get_data_transform
+from torch.autograd import Variable
 
 import torch.utils.model_zoo as model_zoo
 from torch import Tensor, nn
 
-import os
 from flame.fedscale_utils.speech import SPEECH, BackgroundNoiseDataset
 from flame.fedscale_utils.transforms_stft import (AddBackgroundNoiseOnSTFT,
                                                     DeleteSTFT,
@@ -67,7 +73,6 @@ model_urls = {
     'resnet101': 'https://download.pytorch.org/models/resnet101-5d3b4d8f.pth',
     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 }
-
 
 def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
@@ -215,53 +220,8 @@ def resnet18(pretrained=False, **kwargs):
         model.load_state_dict(model_zoo.load_url(model_urls['resnet18']))
     return model
 
-
-def resnet34(pretrained=False, **kwargs):
-    """Constructs a ResNet-34 model.
-
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
-    """
-    model = ResNet(BasicBlock, [3, 4, 6, 3], **kwargs)
-    if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['resnet34']))
-    return model
-
-
-def resnet50(pretrained=False, **kwargs):
-    """Constructs a ResNet-50 model.
-
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
-    """
-    model = ResNet(Bottleneck, [3, 4, 6, 3], **kwargs)
-    if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['resnet50']))
-    return model
-
-
-def resnet101(pretrained=False, **kwargs):
-    """Constructs a ResNet-101 model.
-
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
-    """
-    model = ResNet(Bottleneck, [3, 4, 23, 3], **kwargs)
-    if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['resnet101']))
-    return model
-
-
-def resnet152(pretrained=False, **kwargs):
-    """Constructs a ResNet-152 model.
-
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
-    """
-    model = ResNet(Bottleneck, [3, 8, 36, 3], **kwargs)
-    if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['resnet152']))
-    return model
+def override(method):
+    return method
 
 class PyTorchGoogleSpeechTrainer(Trainer):
     """PyTorch Google Speech Trainer."""
@@ -276,7 +236,7 @@ class PyTorchGoogleSpeechTrainer(Trainer):
         self.train_loader = None
 
         self.epochs = self.config.hyperparameters.epochs
-        self.batch_size = 16 # self.config.hyperparameters.batch_size or 16
+        self.batch_size = self.config.hyperparameters.batch_size or 16
         self.num_class = 35
         self.data_dir = "/mydata/FedScale/benchmark/dataset/data/google_speech"
 
@@ -290,13 +250,21 @@ class PyTorchGoogleSpeechTrainer(Trainer):
 
         self.load_background_noise_data()
 
+        # Latency metrics
+        self.load_data_delay = 0
+        self.local_training_delay = 0
+
+        # Output logs
+        log_file = f"/mydata/google_speech_trainer-{config.task_id}.log"
+        file_handler = logging.FileHandler(log_file)
+        logger.addHandler(file_handler)
+
     def initialize(self) -> None:
         """Initialize role."""
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu")
-        print(f" torch.cuda.is_available(): {torch.cuda.is_available()}")
 
-        self.model = resnet34(num_classes=35, in_channels=1).to(self.device)
+        self.model = resnet18(num_classes=35, in_channels=1).to(self.device)
 
     def load_background_noise_data(self) -> None: 
         """Loading Background Noise Dataset"""
@@ -311,10 +279,10 @@ class PyTorchGoogleSpeechTrainer(Trainer):
 
     def load_data(self) -> None:
         """Load data."""
+        self.LOAD_START_T = time.time()
 
         # Generate a random parition ID
         self.partition_id = random.randint(0, 2165)
-        print(f"partition_id: {self.partition_id}")
 
         # Loading Training Speech Dataset
         train_feature_transform = transforms.Compose([ToMelSpectrogramFromSTFT(
@@ -327,8 +295,13 @@ class PyTorchGoogleSpeechTrainer(Trainer):
 
         self.train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size)
 
+        self.LOAD_END_T = time.time()
+        self.load_data_delay = self.LOAD_END_T - self.LOAD_START_T
+
     def train(self) -> None:
         """Train a model."""
+        self.TRAIN_START_T = time.time()
+
         self.optimizer = optim.Adadelta(self.model.parameters())
 
         for epoch in range(1, self.epochs + 1):
@@ -336,6 +309,9 @@ class PyTorchGoogleSpeechTrainer(Trainer):
 
         # save dataset size so that the info can be shared with aggregator
         self.dataset_size = len(self.train_loader.dataset)
+
+        self.TRAIN_END_T = time.time()
+        self.local_training_delay = self.TRAIN_END_T - self.TRAIN_START_T
 
     def _train_epoch(self, epoch):
         self.model.train()
@@ -377,6 +353,32 @@ class PyTorchGoogleSpeechTrainer(Trainer):
         # Implement this if testing is needed in trainer
         pass
 
+    @override
+    def save_metrics(self):
+        """Save metrics in a model registry."""
+
+        self.metrics = self.metrics | self.mc.get()
+        self.mc.clear()
+        logger.debug(f"saving metrics: {self.metrics}")
+        if self.metrics:
+            self.registry_client.save_metrics(self._round - 1, self.metrics)
+            logger.debug("saving metrics done")
+
+        logger.info(f"Wall-clock time: {time.time()} || "
+                    f"Training delay (s): {self.local_training_delay:.4f} || "
+                    f"Loading data delay (s): {self.load_data_delay:.4f} || "
+                    f"Fetch task delay: {self.fetch_delay:.4f} || "
+                    f"MSG delay: {self.msg_delay:.4f} || "
+                    f"Send task delay: {self.send_delay:.4f}")
+
+        logger.info(f"Trainer ({self.config.task_id}) Timestamps: "
+                    f"TRAIN, TRAIN_START_T: {self.TRAIN_START_T}, TRAIN_END_T: {self.TRAIN_END_T} || "
+                    f"LOAD, LOAD_START_T: {self.LOAD_START_T}, LOAD_END_T: {self.LOAD_END_T} || "
+                    f"FETCH, FETCH_START_T: {self.FETCH_START_T}, FETCH_END_T: {self.FETCH_END_T} || "
+                    f"SEND, SEND_START_T: {self.SEND_START_T}, SEND_END_T: {self.SEND_END_T} || "
+                    f"MSG_MTr, MSG_MTr_START_T: {self.MSG_MTr_START_T}, MSG_MTr_END_T: {self.MSG_MTr_END_T}")
+
+    @override
     def compose(self) -> None:
         """Compose role with tasklets."""
         with Composer() as composer:
@@ -399,13 +401,15 @@ class PyTorchGoogleSpeechTrainer(Trainer):
 
             task_save_metrics = Tasklet("save_metrics", self.save_metrics)
 
+            task_get_aggregator = Tasklet("get_aggregator", self._get_aggregator)
+
             # create a loop object with loop exit condition function
             loop = Loop(loop_check_fn=lambda: self._work_done)
             (
                 task_internal_init
                 >> task_init
                 >> loop(
-                    task_load_data >> task_get >> task_train >> task_eval >> task_put >> task_save_metrics
+                    task_load_data >> task_get_aggregator >> task_get >> task_train >> task_eval >> task_put >> task_save_metrics
                 )
             )
 

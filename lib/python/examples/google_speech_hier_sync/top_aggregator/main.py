@@ -22,6 +22,7 @@ https://github.com/pytorch/examples/blob/master/mnist/main.py.
 import logging
 import random
 import time
+import math
 
 from flame.mode.composer import Composer
 from flame.mode.tasklet import Loop, Tasklet
@@ -30,16 +31,16 @@ TAG_DISTRIBUTE = "distribute"
 TAG_AGGREGATE = "aggregate"
 
 import torch
-import torch.nn as nn
+# import torch.nn as nn
 import torch.nn.functional as F
 from flame.config import Config
 from flame.dataset import Dataset
-from flame.mode.horizontal.top_aggregator import TopAggregator
+from flame.mode.horizontal.coord_syncfl.top_aggregator import TopAggregator
 from torchvision import datasets, transforms
+import torchvision.models as tormodels
 
-import math
-from typing import Any, Callable, Dict, List, Optional, Sequence
-
+# from flame.fedscale_utils.femnist import FEMNIST
+# from flame.fedscale_utils.utils_data import get_data_transform
 import torch.utils.model_zoo as model_zoo
 from torch import Tensor, nn
 from torch.autograd import Variable
@@ -50,12 +51,11 @@ from flame.fedscale_utils.transforms_wav import (FixAudioLength, LoadAudio,
                                                     ToTensor)
 
 logger = logging.getLogger(__name__)
-log_file = "/mydata/google_speech_aggregator.log"
+log_file = "/mydata/google_speech_top_aggregator.log"
 file_handler = logging.FileHandler(log_file)
 logger.addHandler(file_handler)
 
-__all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
-           'resnet152']
+__all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152']
 
 model_urls = {
     'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
@@ -64,7 +64,6 @@ model_urls = {
     'resnet101': 'https://download.pytorch.org/models/resnet101-5d3b4d8f.pth',
     'resnet152': 'https://download.pytorch.org/models/resnet152-b121ed2d.pth',
 }
-
 
 def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
@@ -212,53 +211,8 @@ def resnet18(pretrained=False, **kwargs):
         model.load_state_dict(model_zoo.load_url(model_urls['resnet18']))
     return model
 
-
-def resnet34(pretrained=False, **kwargs):
-    """Constructs a ResNet-34 model.
-
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
-    """
-    model = ResNet(BasicBlock, [3, 4, 6, 3], **kwargs)
-    if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['resnet34']))
-    return model
-
-
-def resnet50(pretrained=False, **kwargs):
-    """Constructs a ResNet-50 model.
-
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
-    """
-    model = ResNet(Bottleneck, [3, 4, 6, 3], **kwargs)
-    if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['resnet50']))
-    return model
-
-
-def resnet101(pretrained=False, **kwargs):
-    """Constructs a ResNet-101 model.
-
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
-    """
-    model = ResNet(Bottleneck, [3, 4, 23, 3], **kwargs)
-    if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['resnet101']))
-    return model
-
-
-def resnet152(pretrained=False, **kwargs):
-    """Constructs a ResNet-152 model.
-
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
-    """
-    model = ResNet(Bottleneck, [3, 8, 36, 3], **kwargs)
-    if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['resnet152']))
-    return model
+def override(method):
+    return method
 
 def accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
@@ -349,18 +303,22 @@ class PyTorchGoogleSpeechAggregator(TopAggregator):
         self.meta_dir = "/mydata/flame_dataset/google_speech/"
         self.partition_id = 1
 
+        self.previous_round_time = time.time()
+        self.current_round_time = time.time()
+
     def initialize(self):
         """Initialize role."""
         self.device = "cpu" # torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.model = resnet34(num_classes=35, in_channels=1).to(self.device)
+        self.model = resnet18(num_classes=35, in_channels=1).to(self.device)
+
 
     def load_data(self) -> None:
         """Load a test dataset."""
+        self.LOAD_START_T = time.time()
 
         # Generate a random parition ID
         self.partition_id = random.randint(0, 214)
-        print(f"partition_id: {self.partition_id}")
 
         # Loading Testing Speech Dataset
         valid_feature_transform = transforms.Compose(
@@ -372,6 +330,9 @@ class PyTorchGoogleSpeechAggregator(TopAggregator):
 
         self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=self.batch_size)
 
+        self.LOAD_END_T = time.time()
+        self.load_data_delay = self.LOAD_END_T - self.LOAD_START_T
+
     def train(self) -> None:
         """Train a model."""
         # Implement this if testing is needed in aggregator
@@ -379,10 +340,41 @@ class PyTorchGoogleSpeechAggregator(TopAggregator):
 
     def evaluate(self) -> None:
         """Evaluate (test) a model."""
+        self.EVAL_START_T = time.time()
 
         test_loss, test_accuray, acc_5, testRes = test_pytorch_model(self.model, self.test_loader, device='cpu')
 
-        logger.info(f"Wall-clock time: {time.time()} || Test loss: {test_loss} || Test accuracy: {acc_5} || CPU time: {self.cpu_time} || CPU utilization: {self.utilization}")
+        self.EVAL_END_T = time.time()
+        self.eval_delay = self.EVAL_END_T - self.EVAL_START_T
+
+        self.current_round_time = time.time()
+        logger.info(f"Wall-clock time: {self.current_round_time} ||"
+                    f"Test loss: {test_loss} || "
+                    f"Test accuracy: {test_accuray} || "
+                    f"CPU time: {self.cpu_time:.4f} || "
+                    f"CPU utilization: {self.utilization:.4f} || "
+                    f"R#{self._round}'s duration (s): {self.current_round_time-self.previous_round_time:.4f} || "
+                    f"Loading data delay (s): {self.load_data_delay:.4f} || "
+                    f"Eval delay (s): {self.eval_delay:.4f} || "
+                    f"Agg delay (s): {self.agg_delay:.4f} || "
+                    f"Coordination delay (s): {self.coordination_delay:.4f} || "
+                    f"DIST task delay: {self.dist_delay:.4f} || "
+                    f"RECV task delay: {self.recv_delay:.4f} || "
+                    f"Queueing delay: {self.queue_delay:.4f} || "
+                    f"MSG (from mid) Ave. delay: {sum(self.msg_from_mid_delays)/len(self.msg_from_mid_delays):.4f} || "
+                    f"Total cache delay: {sum(self.cache_delays):.4f} || "
+                    f"Ave. cache delay: {sum(self.cache_delays)/len(self.cache_delays):.4f}")
+
+        logger.info(f"Top Aggregator Timestamps: "
+                    f"CACHE, CACHE_START_T: {self.CACHE_START_T}, CACHE_END_T: {self.CACHE_END_T} || "
+                    f"AGG, AGG_START_T: {self.AGG_START_T}, AGG_END_T: {self.AGG_END_T} || "
+                    f"EVAL, EVAL_START_T: {self.EVAL_START_T}, EVAL_END_T: {self.EVAL_END_T} || "
+                    f"RECV, RECV_START_T: {self.RECV_START_T}, RECV_END_T: {self.RECV_END_T} || "
+                    f"DIST, DIST_START_T: {self.DIST_START_T}, DIST_END_T: {self.DIST_END_T} || "
+                    f"LOAD, LOAD_START_T: {self.LOAD_START_T}, LOAD_END_T: {self.LOAD_END_T} || "
+                    f"MSG_MTo, MSG_MTo_START_T: {self.MSG_MTo_START_T}, MSG_MTo_END_T: {self.MSG_MTo_END_T}")
+
+        self.previous_round_time = self.current_round_time
 
         # update metrics after each evaluation so that the metrics can be
         # logged in a model registry.
@@ -390,8 +382,8 @@ class PyTorchGoogleSpeechAggregator(TopAggregator):
             'test-loss': test_loss,
             'test-accuracy': test_accuray
         })
-        # pass
 
+    @override
     def compose(self) -> None:
         """Compose role with tasklets."""
         with Composer() as composer:
@@ -425,6 +417,8 @@ class PyTorchGoogleSpeechAggregator(TopAggregator):
 
             task_save_model = Tasklet("save_model", self.save_model)
 
+            task_get_coord_ends = Tasklet("get_coord_ends", self.get_coordinated_ends)
+
         # create a loop object with loop exit condition function
         loop = Loop(loop_check_fn=lambda: self._work_done)
         (
@@ -432,6 +426,7 @@ class PyTorchGoogleSpeechAggregator(TopAggregator):
             >> task_init
             >> loop(
                 task_load_data
+                >> task_get_coord_ends
                 >> task_put
                 >> task_get
                 >> task_train
@@ -440,7 +435,7 @@ class PyTorchGoogleSpeechAggregator(TopAggregator):
                 >> task_save_metrics
                 >> task_increment_round
             )
-            >> task_end_of_training
+            # >> task_end_of_training
             >> task_save_params
             >> task_save_model
         )
