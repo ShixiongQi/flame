@@ -85,7 +85,7 @@
         }
     ],
     "hyperparameters": {
-        "rounds": 10
+        "rounds": 1000
     },
     "job": {
         "id": "622a358619ab59012eabeefb",

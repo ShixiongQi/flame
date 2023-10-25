@@ -150,7 +150,7 @@ class PyTorchFemnistAggregator(TopAggregator):
         self.LOAD_START_T = time.time()
 
         # Generate a random parition ID
-        self.partition_id = random.randint(1, 354)
+        self.partition_id = random.randint(1, 67)
 
         train_transform, test_transform = get_data_transform('mnist')
         test_dataset = FEMNIST(self.data_dir, self.meta_dir, self.partition_id,
