@@ -92,7 +92,7 @@ class PyTorchFemnistTrainer(Trainer):
         self.LOAD_START_T = time.time()
 
         # Generate a random parition ID
-        self.partition_id = random.randint(1, 3399)
+        self.partition_id = random.randint(1, 2798)
 
         train_transform, test_transform = get_data_transform('mnist')
         train_dataset = FEMNIST(self.data_dir, self.meta_dir, self.partition_id,
