@@ -120,7 +120,7 @@ class PyTorchFemnistTrainer(Trainer):
         self.TRAIN_END_T = time.time()
         self.local_training_delay = self.TRAIN_END_T - self.TRAIN_START_T
 
-        sleep_time = random.randint(0, 5)
+        sleep_time = random.randint(0, 30)
         print(f"Sleep for {sleep_time} seconds")
         time.sleep(sleep_time)
 
