@@ -171,6 +171,10 @@ class TopAggregator(Role, metaclass=ABCMeta):
         start_cpu_time = psutil.cpu_times()
         # receive local model parameters from trainers
         for msg, metadata in channel.recv_fifo(channel.ends()):
+
+            print(f"Top agg. sleep 2 sec after recv_fifo")
+            time.sleep(2)
+
             if total == 0:
                 RECV_FIRST_T = time.time()
             else:
