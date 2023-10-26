@@ -85,7 +85,7 @@ class PyTorchFemnistTrainer(Trainer):
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu")
 
-        self.model = tormodels.__dict__["resnet18"](num_classes=62).to(self.device)
+        self.model = tormodels.__dict__["resnet152"](num_classes=62).to(self.device)
 
     def load_data(self) -> None:
         """Load data."""
