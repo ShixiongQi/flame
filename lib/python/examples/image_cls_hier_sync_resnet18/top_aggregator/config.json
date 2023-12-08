@@ -70,7 +70,7 @@
     "hyperparameters": {
         "batchSize": 32,
         "learningRate": 0.01,
-        "rounds": 1000
+        "rounds": 200
     },
     "baseModel": {
         "name": "",
