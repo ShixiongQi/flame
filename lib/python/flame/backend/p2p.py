@@ -36,8 +36,8 @@ logger = logging.getLogger(__name__)
 ENDPOINT_TOKEN_LEN = 2
 META_SVR_HEART_BEAT_DURATION = 3000  # for metaserver
 
-PEER_HEART_BEAT_PERIOD = 200  # 20 seconds
-PEER_HEART_BEAT_WAIT_TIME = 10 * PEER_HEART_BEAT_PERIOD
+PEER_HEART_BEAT_PERIOD = 1000  # 20 seconds
+PEER_HEART_BEAT_WAIT_TIME = 1.5 * PEER_HEART_BEAT_PERIOD
 HEART_BEAT_UPDATE_SKIP_TIME = PEER_HEART_BEAT_PERIOD / 4
 
 GRPC_MAX_MESSAGE_LENGTH = 1073741824  # 1GB
@@ -88,7 +88,7 @@ class BackendServicer(msg_pb2_grpc.BackendRouteServicer):
         # this event can occur only when the backend leaves a channel
         # and the channel has the end id
         await event.wait()
-        logger.debug("context release event got triggered!")
+        logger.info("context release event got triggered!")
 
 
 class PointToPointBackend(AbstractBackend):
@@ -204,7 +204,7 @@ class PointToPointBackend(AbstractBackend):
             if channel.name() not in self._channels:
                 return
 
-            logger.debug(f"clean up resources for {channel.name()}")
+            logger.info(f"clean up resources for {channel.name()}")
 
             # remove channel from _channels
             del self._channels[channel.name()]
@@ -278,7 +278,7 @@ class PointToPointBackend(AbstractBackend):
         self._channels[channel.name()] = channel
 
     async def _register_channel(self, channel) -> None:
-        logger.debug("calling _register_channel")
+        logger.info("calling _register_channel")
         with grpc.insecure_channel(self._broker) as grpc_channel:
             stub = meta_pb2_grpc.MetaRouteStub(grpc_channel)
             meta_info = meta_pb2.MetaInfo(
@@ -294,20 +294,20 @@ class PointToPointBackend(AbstractBackend):
             if meta_resp:
                 meta_pb2_success = meta_pb2.MetaResponse.Status.SUCCESS
                 if meta_resp.status != meta_pb2_success:
-                    logger.debug("registration failed")
+                    logger.info("registration failed")
                     raise SystemError("registration failure")
 
                 for endpoint in meta_resp.endpoints:
-                    logger.debug(f"connecting to endpoint: {endpoint}")
+                    logger.info(f"connecting to endpoint: {endpoint}")
                     await self._connect_and_notify(endpoint, channel.name())
 
             channel_name = channel.name()
             self.meta_svr_heartbeat[channel_name] = True
             while self.meta_svr_heartbeat[channel_name]:
                 meta_resp = stub.HeartBeat(meta_info)
-                logger.debug(f"meta_resp from heart beat: {meta_resp}")
+                logger.info(f"meta_resp from heart beat: {meta_resp}")
                 await asyncio.sleep(META_SVR_HEART_BEAT_DURATION)
-            logger.debug(f"out form meta server heart beat loop on {channel_name}")
+            logger.info(f"out form meta server heart beat loop on {channel_name}")
 
     async def _connect_and_notify(self, endpoint: str, ch_name: str) -> None:
         grpc_ch = grpc.aio.insecure_channel(
@@ -324,7 +324,7 @@ class PointToPointBackend(AbstractBackend):
     async def notify(self, channel_name, notify_type, stub, grpc_ch) -> bool:
         """Send a notify message to an end by using stub."""
         if channel_name not in self._channels:
-            logger.debug(f"channel {channel_name} not found")
+            logger.info(f"channel {channel_name} not found")
             return False
 
         msg = msg_pb2.Notify(
@@ -334,10 +334,10 @@ class PointToPointBackend(AbstractBackend):
         try:
             resp = await stub.notify_end(msg)
         except grpc.aio.AioRpcError:
-            logger.debug("can't proceed as grpc channel is unavailable")
+            logger.info("can't proceed as grpc channel is unavailable")
             return False
 
-        logger.debug(f"resp = {resp}")
+        logger.info(f"resp = {resp}")
         _ = await self._handle_notification(resp, stub, grpc_ch)
 
         return True
@@ -351,11 +351,11 @@ class PointToPointBackend(AbstractBackend):
         if msg.end_id == self._id:
             # This case happens when message is broadcast to a self-loop
             # e.g., distributed topology
-            logger.debug("message sent to self; do nothing")
+            logger.info("message sent to self; do nothing")
             return msg_pb2.Notify(type=msg_pb2.NotifyType.ACK)
 
         if msg.channel_name not in self._channels:
-            logger.debug("channel not found")
+            logger.info("channel not found")
             return msg_pb2.Notify(type=msg_pb2.NotifyType.ACK)
 
         channel = self._channels[msg.channel_name]
@@ -363,7 +363,7 @@ class PointToPointBackend(AbstractBackend):
         if msg.type == msg_pb2.NotifyType.JOIN and not channel.has(msg.end_id):
             if stub is not None:  # this is client
                 reader = stub.recv_data(msg_pb2.BackendID(end_id=self._id))
-                logger.debug(f"type of reader = {type(reader)}")
+                logger.info(f"type of reader = {type(reader)}")
                 # (w, x, y, z) - w: reader, x: writer for server (context)
                 # y: writer for client (stub), z: a grpc channel
                 # grpc channel is saved to prevent it from
@@ -387,7 +387,7 @@ class PointToPointBackend(AbstractBackend):
 
             # this is the first time to see this end,
             # so let's notify my presence to the end
-            logger.debug("acknowledge notification")
+            logger.info("acknowledge notification")
             return msg_pb2.Notify(
                 end_id=self._id,
                 channel_name=msg.channel_name,
@@ -395,7 +395,7 @@ class PointToPointBackend(AbstractBackend):
             )
 
         elif msg.type == msg_pb2.NotifyType.LEAVE:
-            logger.debug(f"{msg.end_id} is leaving {msg.channel_name}")
+            logger.info(f"{msg.end_id} is leaving {msg.channel_name}")
             await self._cleanup_end(msg.end_id)
 
         return msg_pb2.Notify(type=msg_pb2.NotifyType.ACK)
@@ -404,13 +404,13 @@ class PointToPointBackend(AbstractBackend):
         if msg.end_id == self._id:
             # This case happens when message is broadcast to a self-loop
             # e.g., distributed topology
-            logger.debug("message sent to self; do nothing")
+            logger.info("message sent to self; do nothing")
             return
 
         if msg.channel_name in self._channels:
             if msg.end_id in self._cleanup_ready:
                 # received data; so disable cleanup readiness for the end
-                logger.debug(f"block cleanup on {msg.end_id}")
+                logger.info(f"block cleanup on {msg.end_id}")
                 self._cleanup_ready[msg.end_id].clear()
 
             channel = self._channels[msg.channel_name]
@@ -429,7 +429,7 @@ class PointToPointBackend(AbstractBackend):
         else:
             await self._unicast_task(channel, end_id)
 
-        logger.debug("_tx_task is done")
+        logger.info("_tx_task is done")
 
     async def _broadcast_task(self, channel):
         """Broadcast messages.
@@ -443,22 +443,22 @@ class PointToPointBackend(AbstractBackend):
             data = await txq.get()
             if data == EMPTY_PAYLOAD:
                 txq.task_done()
-                logger.debug("broadcast task got an empty msg from queue")
+                logger.info("broadcast task got an empty msg from queue")
                 break
 
             end_ids = list(channel._ends.keys())
-            logger.debug(f"end ids for {channel.name()} bcast = {end_ids}")
+            logger.info(f"end ids for {channel.name()} bcast = {end_ids}")
             for end_id in end_ids:
                 try:
                     await self.send_chunks(end_id, channel.name(), data)
                 except Exception as ex:
                     ex_name = type(ex).__name__
-                    logger.debug(f"An exception of type {ex_name} occurred")
+                    logger.info(f"An exception of type {ex_name} occurred")
                     await self._cleanup_end(end_id)
 
             txq.task_done()
 
-        logger.debug(f"broadcast task for {channel.name()} terminated")
+        logger.info(f"broadcast task for {channel.name()} terminated")
 
     async def _unicast_task(self, channel, end_id):
         txq = channel.get_txq(end_id)
@@ -468,7 +468,7 @@ class PointToPointBackend(AbstractBackend):
                 data = await asyncio.wait_for(txq.get(), PEER_HEART_BEAT_PERIOD)
             except asyncio.TimeoutError:
                 if end_id not in self._endpoints:
-                    logger.debug(f"end_id {end_id} not in _endpoints")
+                    logger.info(f"end_id {end_id} not in _endpoints")
                     break
 
                 _, _, clt_writer, _ = self._endpoints[end_id]
@@ -490,20 +490,20 @@ class PointToPointBackend(AbstractBackend):
 
                     yield msg
 
-                logger.debug("sending heart beat to server")
+                logger.info("sending heart beat to server")
                 await clt_writer.send_data(heart_beat())
                 continue
 
             if data == EMPTY_PAYLOAD:
                 txq.task_done()
-                logger.debug("unicast tx task got an empty msg from queue")
+                logger.info("unicast tx task got an empty msg from queue")
                 break
 
             try:
                 await self.send_chunks(end_id, channel.name(), data)
             except Exception as ex:
                 ex_name = type(ex).__name__
-                logger.debug(f"An exception of type {ex_name} occurred")
+                logger.info(f"An exception of type {ex_name} occurred")
                 await self._cleanup_end(end_id)
                 txq.task_done()
                 # This break ends a tx_task for end_id
@@ -511,7 +511,7 @@ class PointToPointBackend(AbstractBackend):
 
             txq.task_done()
 
-        logger.debug(f"unicast task for {end_id} terminated")
+        logger.info(f"unicast task for {end_id} terminated")
 
     async def send_chunks(self, other: str, ch_name: str, data: bytes) -> None:
         """Send data chunks to an end."""
@@ -524,7 +524,7 @@ class PointToPointBackend(AbstractBackend):
             for msg in self._generate_data_messages(ch_name, data):
                 await svr_writer.write(msg)
         else:
-            logger.debug("writer not found}")
+            logger.info("writer not found}")
 
     def _generate_data_messages(
         self, ch_name: str, data: bytes
@@ -549,10 +549,10 @@ class PointToPointBackend(AbstractBackend):
 
     async def _set_writer(self, end_id: str, context: grpc.aio.ServicerContext) -> None:
         if end_id in self._endpoints:
-            logger.debug(f"{end_id} is already registered")
+            logger.info(f"{end_id} is already registered")
             return
 
-        logger.debug(f"{end_id}: context = {context}")
+        logger.info(f"{end_id}: context = {context}")
 
         self._endpoints[end_id] = (None, context, None, None)
 
@@ -573,11 +573,11 @@ class PointToPointBackend(AbstractBackend):
             try:
                 msg = await reader.read()
             except grpc.aio.AioRpcError:
-                logger.debug(f"AioRpcError occurred for {end_id}")
+                logger.info(f"AioRpcError occurred for {end_id}")
                 break
 
             if msg == grpc.aio.EOF:
-                logger.debug("got grpc.aio.EOF")
+                logger.info("got grpc.aio.EOF")
                 break
 
             await self._handle_data(msg)
@@ -586,7 +586,7 @@ class PointToPointBackend(AbstractBackend):
         # so, clean up an entry for end_id from _endpoints dict
         await self._cleanup_end(end_id)
 
-        logger.debug(f"cleaned up {end_id} info from _endpoints")
+        logger.info(f"cleaned up {end_id} info from _endpoints")
 
     async def set_cleanup_ready_async(self, end_id: str) -> None:
         """Set cleanup ready event for a given end id.
@@ -594,7 +594,7 @@ class PointToPointBackend(AbstractBackend):
         This should be called in self._loop thread.
         """
         if end_id in self._cleanup_ready:
-            logger.debug(f"set _cleanup_ready event for {end_id}")
+            logger.info(f"set _cleanup_ready event for {end_id}")
             self._cleanup_ready[end_id].set()
 
     def set_cleanup_ready(self, end_id: str) -> None:
@@ -662,14 +662,14 @@ class PointToPointBackend(AbstractBackend):
             self._livecheck[end_id].cancel()
             del self._livecheck[end_id]
 
-        logger.debug(f"waiting for _cleanup_ready for {end_id}")
+        logger.info(f"waiting for _cleanup_ready for {end_id}")
         # wait for the cleanup ready event to be set for end_id
         # to ensure that all the msg in the rx queue of the end
         # is consumed
         if end_id in self._cleanup_ready:
             await self._cleanup_ready[end_id].wait()
 
-        logger.debug(f"ready to remove {end_id} from channel")
+        logger.info(f"ready to remove {end_id} from channel")
 
         # linear iteration is okay because there are not many
         # channels per role in general
@@ -680,10 +680,10 @@ class PointToPointBackend(AbstractBackend):
         # stop the chunk thread responsible for handling messages from end_id
         self.chunk_mgr.stop(end_id)
 
-        logger.debug(f"cleanup {end_id} done")
+        logger.info(f"cleanup {end_id} done")
 
     def _set_heart_beat(self, end_id) -> None:
-        logger.debug(f"heart beat data message for {end_id}")
+        logger.info(f"heart beat data message for {end_id}")
         if end_id not in self._livecheck:
             self._livecheck[end_id] = LiveChecker(
                 self, end_id, PEER_HEART_BEAT_WAIT_TIME
@@ -697,9 +697,9 @@ class PointToPointBackend(AbstractBackend):
             return
 
         n = len(self.tx_tasks[channel_name])
-        logger.debug(f"waiting for {n} tasks to be done")
+        logger.info(f"waiting for {n} tasks to be done")
         await asyncio.gather(*self.tx_tasks[channel_name])
-        logger.debug(f"all done for {channel_name}")
+        logger.info(f"all done for {channel_name}")
 
 
 class LiveChecker:
@@ -717,7 +717,7 @@ class LiveChecker:
     async def _check(self):
         await asyncio.sleep(self._timeout)
         await self._p2pbe._cleanup_end(self._end_id)
-        logger.debug(f"live check timeout occured for {self._end_id}")
+        logger.info(f"live check timeout occured for {self._end_id}")
 
     def cancel(self) -> None:
         """Cancel a task."""
@@ -725,14 +725,14 @@ class LiveChecker:
             return
 
         self._task.cancel()
-        logger.debug(f"cancelled task for {self._end_id}")
+        logger.info(f"cancelled task for {self._end_id}")
 
     def reset(self) -> None:
         """Reset a task."""
         now = time.time()
         if now - self._last_reset < HEART_BEAT_UPDATE_SKIP_TIME:
             # this is to prevent too frequent reset
-            logger.debug("too frequent reset request; skip it")
+            logger.info("too frequent reset request; skip it")
             return
 
         self._last_reset = now
@@ -741,4 +741,4 @@ class LiveChecker:
 
         self._task = asyncio.ensure_future(self._check())
 
-        logger.debug(f"set future for {self._end_id}")
+        logger.info(f"set future for {self._end_id}")
