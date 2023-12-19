@@ -460,6 +460,20 @@ class PointToPointBackend(AbstractBackend):
 
         logger.debug(f"broadcast task for {channel.name()} terminated")
 
+
+    def get_writer(self, end_id: str):
+        """Return a writer for a given end_id."""
+        writer = None
+
+        _, svr_writer, clt_writer, _ = self._endpoints[end_id]
+
+        if clt_writer:
+            writer = clt_writer
+        elif svr_writer:
+            writer = svr_writer
+
+        return writer
+
     async def _unicast_task(self, channel, end_id):
         txq = channel.get_txq(end_id)
 
@@ -471,8 +485,9 @@ class PointToPointBackend(AbstractBackend):
                     logger.debug(f"end_id {end_id} not in _endpoints")
                     break
 
-                _, _, clt_writer, _ = self._endpoints[end_id]
-                if clt_writer is None:
+                writer = self.get_writer(end_id)
+                if writer is None:
+                    logger.warn("no writer")
                     continue
 
                 def heart_beat():
@@ -491,7 +506,8 @@ class PointToPointBackend(AbstractBackend):
                     yield msg
 
                 logger.debug("sending heart beat to server")
-                await clt_writer.send_data(heart_beat())
+                await writer.send_data(heart_beat())
+                logger.debug(f"sent heart beat {end_id}")
                 continue
 
             if data == EMPTY_PAYLOAD:
@@ -512,6 +528,7 @@ class PointToPointBackend(AbstractBackend):
             txq.task_done()
 
         logger.debug(f"unicast task for {end_id} terminated")
+    
 
     async def send_chunks(self, other: str, ch_name: str, data: bytes) -> None:
         """Send data chunks to an end."""
@@ -716,14 +733,17 @@ class LiveChecker:
 
     async def _check(self):
         await asyncio.sleep(self._timeout)
+        logger.debug(f"done with sleep, moving on to cleanup for {self._end_id}")
         await self._p2pbe._cleanup_end(self._end_id)
         logger.debug(f"live check timeout occured for {self._end_id}")
 
     def cancel(self) -> None:
         """Cancel a task."""
         if self._task is None or self._task.cancelled():
+            logger.debug(f"task is None or got cancelled {self._end_id}")
             return
 
+        logger.debug(f"cancelling task for {self._end_id}")
         self._task.cancel()
         logger.debug(f"cancelled task for {self._end_id}")
 
@@ -735,10 +755,13 @@ class LiveChecker:
             logger.debug("too frequent reset request; skip it")
             return
 
+        logger.debug(f"setting last reset for {self._end_id}")
         self._last_reset = now
 
+        logger.debug(f"cancelling {self._end_id}")
         self.cancel()
 
+        logger.debug(f"ensuring future {self._end_id}")
         self._task = asyncio.ensure_future(self._check())
 
         logger.debug(f"set future for {self._end_id}")
