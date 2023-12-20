@@ -60,11 +60,14 @@ class BackendServicer(msg_pb2_grpc.BackendRouteServicer):
         """Implement a method to handle send_data request stream."""
         # From server perspective, the server receives data from client.
         async for msg in req_iter:
+            is_heart_beat = (msg.seqno == -1 and msg.eom is True and msg.channel_name == "")
+            logger.info(f"message from {msg.end_id}, is heart beat = {is_heart_beat}")
             self.p2pbe._set_heart_beat(msg.end_id)
             # if the message is not a heart beat message,
             # the message needs to be processed.
             if msg.seqno != -1 or msg.eom is False or msg.channel_name != "":
                 await self.p2pbe._handle_data(msg)
+            logger.info(f"done processing message from {msg.end_id}")
 
         return msg_pb2.BackendID(end_id=self.p2pbe._id)
 
