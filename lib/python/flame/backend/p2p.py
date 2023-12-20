@@ -739,7 +739,7 @@ class LiveChecker:
         now = time.time()
         if now - self._last_reset < HEART_BEAT_UPDATE_SKIP_TIME:
             # this is to prevent too frequent reset
-            logger.debug("too frequent reset request; skip it {self._end_id}")
+            logger.debug(f"too frequent reset request; skip it {self._end_id}")
             return
 
         logger.debug(f"setting last reset for {self._end_id}")
