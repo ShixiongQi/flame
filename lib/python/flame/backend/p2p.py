@@ -535,6 +535,7 @@ class PointToPointBackend(AbstractBackend):
             def _yield_helper(msg):
                 yield msg
             for msg in self._generate_data_messages(ch_name, data):
+                logger.debug(f"calling clt_writer.send_data for {other}")
                 await clt_writer.send_data(_yield_helper(msg))
         elif svr_writer is not None:
             for msg in self._generate_data_messages(ch_name, data):
