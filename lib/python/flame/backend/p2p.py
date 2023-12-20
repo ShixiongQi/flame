@@ -504,10 +504,10 @@ class PointToPointBackend(AbstractBackend):
                     )
 
                     yield msg
-
-                logger.debug("sending heart beat to server")
-                await writer.send_data(heart_beat())
-                logger.debug(f"sent heart beat {end_id}")
+                
+                logger.debug(f"sending heart beat to {end_id}")
+                await clt_writer.send_data(heart_beat())
+                logger.debug(f"sent heart beat to {end_id}")
                 continue
 
             if data == EMPTY_PAYLOAD:
@@ -733,14 +733,14 @@ class LiveChecker:
 
     async def _check(self):
         await asyncio.sleep(self._timeout)
-        logger.debug(f"done with sleep, moving on to cleanup for {self._end_id}")
+        logger.debug(f"got out of asyncio.sleep, heading into _cleanup_end {self._end_id}")
         await self._p2pbe._cleanup_end(self._end_id)
         logger.debug(f"live check timeout occured for {self._end_id}")
 
     def cancel(self) -> None:
         """Cancel a task."""
         if self._task is None or self._task.cancelled():
-            logger.debug(f"task is None or got cancelled {self._end_id}")
+            logger.debug(f"self._task is None or it was cancelled {self._end_id}")
             return
 
         logger.debug(f"cancelling task for {self._end_id}")
@@ -752,7 +752,7 @@ class LiveChecker:
         now = time.time()
         if now - self._last_reset < HEART_BEAT_UPDATE_SKIP_TIME:
             # this is to prevent too frequent reset
-            logger.debug("too frequent reset request; skip it")
+            logger.debug("too frequent reset request; skip it {self._end_id}")
             return
 
         logger.debug(f"setting last reset for {self._end_id}")
@@ -761,7 +761,7 @@ class LiveChecker:
         logger.debug(f"cancelling {self._end_id}")
         self.cancel()
 
-        logger.debug(f"ensuring future {self._end_id}")
+        logger.debug(f"ensuring future for {self._end_id}")
         self._task = asyncio.ensure_future(self._check())
 
         logger.debug(f"set future for {self._end_id}")
