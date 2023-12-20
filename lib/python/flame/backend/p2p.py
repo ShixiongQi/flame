@@ -62,6 +62,9 @@ class BackendServicer(msg_pb2_grpc.BackendRouteServicer):
         async for msg in req_iter:
             is_heart_beat = (msg.seqno == -1 and msg.eom is True and msg.channel_name == "")
             logger.info(f"message from {msg.end_id}, is heart beat = {is_heart_beat}")
+            if is_heart_beat:
+                heart_beat_seq = int(msg.payload)
+                logger.info(f"heart beat sequence number: {heart_beat_seq}")
             self.p2pbe._set_heart_beat(msg.end_id)
             # if the message is not a heart beat message,
             # the message needs to be processed.
@@ -465,6 +468,7 @@ class PointToPointBackend(AbstractBackend):
 
     async def _unicast_task(self, channel, end_id):
         txq = channel.get_txq(end_id)
+        heart_beat_seq = 0
 
         while True:
             try:
@@ -483,13 +487,15 @@ class PointToPointBackend(AbstractBackend):
                     #    channel_name = ""
                     #    seqno = -1
                     #    eom = True
+                    byte_hb_seq = bytes(str(heart_beat_seq), "ascii")
                     msg = msg_pb2.Data(
                         end_id=self._id,
                         channel_name="",
-                        payload=EMPTY_PAYLOAD,
+                        payload=byte_hb_seq,
                         seqno=-1,
                         eom=True,
                     )
+                    heart_beat_seq += 1
 
                     yield msg
 
@@ -504,7 +510,9 @@ class PointToPointBackend(AbstractBackend):
                 break
 
             try:
+                logger.info(f"sending data to {end_id}")
                 await self.send_chunks(end_id, channel.name(), data)
+                logger.info(f"sent data to {end_id}")
             except Exception as ex:
                 ex_name = type(ex).__name__
                 logger.debug(f"An exception of type {ex_name} occurred")
