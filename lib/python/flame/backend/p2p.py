@@ -483,6 +483,7 @@ class PointToPointBackend(AbstractBackend):
                     continue
 
                 def heart_beat():
+                    nonlocal heart_beat_seq
                     # the condition for heart beat message:
                     #    channel_name = ""
                     #    seqno = -1
