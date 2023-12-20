@@ -48,6 +48,7 @@ TAG_UPLOAD = "upload"
 # 60 second wait time until a trainer appears in a channel
 WAIT_TIME_FOR_TRAINER = 60
 
+custom_temp_dir = "/mydata/tmp"
 
 class MiddleAggregator(Role, metaclass=ABCMeta):
     """Middle level aggregator.
@@ -77,7 +78,10 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
 
         # disk cache is used for saving memory in case model is large
         # automatic eviction of disk cache is disabled with cull_limit 0
-        self.cache = Cache()
+        if not os.path.exists(custom_temp_dir):
+            os.makedirs(custom_temp_dir)
+        temp_dir = tempfile.TemporaryDirectory(dir=custom_temp_dir)
+        self.cache = Cache(directory=temp_dir.name)
         self.cache.reset("size_limit", 1e15)
         self.cache.reset("cull_limit", 0)
 
