@@ -60,11 +60,17 @@ class BackendServicer(msg_pb2_grpc.BackendRouteServicer):
         """Implement a method to handle send_data request stream."""
         # From server perspective, the server receives data from client.
         async for msg in req_iter:
+            is_heart_beat = (msg.seqno == -1 and msg.eom is True and msg.channel_name == "")
+            logger.info(f"message from {msg.end_id}, is heart beat = {is_heart_beat}")
+            if is_heart_beat:
+                heart_beat_seq = int(msg.payload)
+                logger.info(f"heart beat sequence number: {heart_beat_seq}")
             self.p2pbe._set_heart_beat(msg.end_id)
             # if the message is not a heart beat message,
             # the message needs to be processed.
             if msg.seqno != -1 or msg.eom is False or msg.channel_name != "":
                 await self.p2pbe._handle_data(msg)
+            logger.info(f"done processing message from {msg.end_id}")
 
         return msg_pb2.BackendID(end_id=self.p2pbe._id)
 
@@ -462,6 +468,7 @@ class PointToPointBackend(AbstractBackend):
 
     async def _unicast_task(self, channel, end_id):
         txq = channel.get_txq(end_id)
+        heart_beat_seq = 0
 
         while True:
             try:
@@ -476,22 +483,26 @@ class PointToPointBackend(AbstractBackend):
                     continue
 
                 def heart_beat():
+                    nonlocal heart_beat_seq
                     # the condition for heart beat message:
                     #    channel_name = ""
                     #    seqno = -1
                     #    eom = True
+                    byte_hb_seq = bytes(str(heart_beat_seq), "ascii")
                     msg = msg_pb2.Data(
                         end_id=self._id,
                         channel_name="",
-                        payload=EMPTY_PAYLOAD,
+                        payload=byte_hb_seq,
                         seqno=-1,
                         eom=True,
                     )
+                    heart_beat_seq += 1
 
                     yield msg
 
-                logger.debug("sending heart beat to server")
+                logger.debug(f"sending heart beat to {end_id}")
                 await clt_writer.send_data(heart_beat())
+                logger.debug(f"sent heart beat to {end_id}")
                 continue
 
             if data == EMPTY_PAYLOAD:
@@ -500,7 +511,9 @@ class PointToPointBackend(AbstractBackend):
                 break
 
             try:
+                logger.info(f"sending data to {end_id}")
                 await self.send_chunks(end_id, channel.name(), data)
+                logger.info(f"sent data to {end_id}")
             except Exception as ex:
                 ex_name = type(ex).__name__
                 logger.debug(f"An exception of type {ex_name} occurred")
@@ -519,12 +532,12 @@ class PointToPointBackend(AbstractBackend):
 
         # TODO: keep regenerating messages can be expensive; revisit this later
         if clt_writer is not None:
-            # await clt_writer.send_data(self._generate_data_messages(ch_name, data))
             def _yield_helper(msg):
                 yield msg
-            for msg in self._generate_data_messages(ch_name, data):
-                await clt_writer.send_data(_yield_helper(msg))
-
+            #for msg in self._generate_data_messages(ch_name, data):
+            #    logger.debug(f"calling clt_writer.send_data for {other}")
+            #    await clt_writer.send_data(_yield_helper(msg))
+            await clt_writer.send_data(self._generate_data_messages(ch_name, data))
         elif svr_writer is not None:
             for msg in self._generate_data_messages(ch_name, data):
                 await svr_writer.write(msg)
@@ -721,14 +734,17 @@ class LiveChecker:
 
     async def _check(self):
         await asyncio.sleep(self._timeout)
+        logger.debug(f"got out of asyncio.sleep, heading into _cleanup_end {self._end_id}")
         await self._p2pbe._cleanup_end(self._end_id)
         logger.debug(f"live check timeout occured for {self._end_id}")
 
     def cancel(self) -> None:
         """Cancel a task."""
         if self._task is None or self._task.cancelled():
+            logger.debug(f"self._task is None or it was cancelled {self._end_id}")
             return
 
+        logger.debug(f"cancelling task for {self._end_id}")
         self._task.cancel()
         logger.debug(f"cancelled task for {self._end_id}")
 
@@ -737,13 +753,16 @@ class LiveChecker:
         now = time.time()
         if now - self._last_reset < HEART_BEAT_UPDATE_SKIP_TIME:
             # this is to prevent too frequent reset
-            logger.debug("too frequent reset request; skip it")
+            logger.debug(f"too frequent reset request; skip it {self._end_id}")
             return
 
+        logger.debug(f"setting last reset for {self._end_id}")
         self._last_reset = now
 
+        logger.debug(f"cancelling {self._end_id}")
         self.cancel()
 
+        logger.debug(f"ensuring future for {self._end_id}")
         self._task = asyncio.ensure_future(self._check())
 
         logger.debug(f"set future for {self._end_id}")
