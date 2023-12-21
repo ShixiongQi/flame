@@ -500,9 +500,9 @@ class PointToPointBackend(AbstractBackend):
 
                     yield msg
 
-                logger.debug(f"sending heart beat to {end_id}")
+                logger.debug(f"sending heart beat {heart_beat_seq} to {end_id}")
                 await clt_writer.send_data(heart_beat())
-                logger.debug(f"sent heart beat to {end_id}")
+                logger.debug(f"sent heart beat {heart_beat_seq} to {end_id}")
                 continue
 
             if data == EMPTY_PAYLOAD:
