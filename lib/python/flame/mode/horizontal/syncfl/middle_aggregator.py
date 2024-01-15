@@ -129,6 +129,9 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
         # one aggregator is sufficient
         end = channel.one_end()
         msg, _ = channel.recv(end)
+
+        time.sleep(4)
+
         self.MSG_ToM_END_T = time.time()
 
         if MessageType.WEIGHTS in msg:
@@ -194,6 +197,8 @@ class MiddleAggregator(Role, metaclass=ABCMeta):
         self.MSG_TrM_START_Ts = []
         # receive local model parameters from trainers
         for msg, metadata in channel.recv_fifo(channel.ends()):
+            time.sleep(4)
+
             if total == 0:
                 RECV_FIRST_T = time.time()
             else:

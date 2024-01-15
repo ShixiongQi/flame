@@ -70,6 +70,9 @@ class Trainer(BaseTrainer):
         channel.await_join()
 
         msg, _ = channel.recv(self.aggregator_id)
+
+        time.sleep(4)
+
         self.MSG_MTr_END_T = time.time()
 
         if MessageType.WEIGHTS in msg:
