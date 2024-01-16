@@ -71,7 +71,7 @@ class Trainer(BaseTrainer):
 
         msg, _ = channel.recv(self.aggregator_id)
 
-        time.sleep(1)
+        time.sleep(1.5)
 
         self.MSG_MTr_END_T = time.time()
 
