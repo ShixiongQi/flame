@@ -132,7 +132,7 @@ class Trainer(Role, metaclass=ABCMeta):
         # one aggregator is sufficient
         end = channel.one_end(VAL_CH_STATE_RECV)
         msg, _ = channel.recv(end)
-        self.MSG_END_T = time.time()
+        self.MSG_MTr_END_T = time.time()
 
         if not msg:
             logger.debug("no message received")
@@ -161,14 +161,14 @@ class Trainer(Role, metaclass=ABCMeta):
             )
 
         if MessageType.SEND_TIMESTAMP in msg:
-            self.MSG_START_T = msg[MessageType.SEND_TIMESTAMP]
+            self.MSG_MTr_START_T = msg[MessageType.SEND_TIMESTAMP]
 
         self.fetch_success = True
         logger.debug(f"work_done: {self._work_done}, round: {self._round}")
 
         self.FETCH_END_T = time.time()
 
-        self.msg_delay = self.MSG_END_T - self.MSG_START_T
+        self.msg_delay = self.MSG_MTr_END_T - self.MSG_MTr_START_T
         self.fetch_delay = self.FETCH_END_T - self.FETCH_START_T
 
     def put(self, tag: str) -> None:
