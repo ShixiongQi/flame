@@ -7,7 +7,7 @@
             "sort": "mqtt"
         },
         {
-            "host": "localhost:10104",
+            "host": "10.10.1.1:10104",
             "sort": "p2p"
         }
     ],
