@@ -13,7 +13,7 @@
 # limitations under the License.
 #
 # SPDX-License-Identifier: Apache-2.0
-"""HIRE_MNIST horizontal hierarchical FL middle level aggregator for Keras."""
+"""HIRE_FEMNIST coordinated horizontal hierarchical FL coordinator."""
 
 import logging
 

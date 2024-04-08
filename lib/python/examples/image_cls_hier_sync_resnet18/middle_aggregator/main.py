@@ -13,7 +13,7 @@
 # limitations under the License.
 #
 # SPDX-License-Identifier: Apache-2.0
-"""HIRE_MNIST horizontal hierarchical FL middle level aggregator for Keras."""
+"""HIRE_FEMNIST coordinated horizontal hierarchical FL middle level aggregator for PyTorch."""
 
 import logging
 import time
@@ -30,8 +30,8 @@ import torchvision.models as tormodels
 logger = logging.getLogger(__name__)
 
 
-class TorchMnistMiddleAggregator(MiddleAggregator):
-    """Torch Mnist Middle Level Aggregator."""
+class TorchFemnistMiddleAggregator(MiddleAggregator):
+    """Torch Femnist Middle Level Aggregator."""
 
     def __init__(self, config: Config) -> None:
         """Initialize a class instance."""
@@ -104,6 +104,6 @@ if __name__ == "__main__":
 
     config = Config(args.config)
 
-    a = TorchMnistMiddleAggregator(config)
+    a = TorchFemnistMiddleAggregator(config)
     a.compose()
     a.run()

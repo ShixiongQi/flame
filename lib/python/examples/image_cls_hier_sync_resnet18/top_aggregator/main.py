@@ -13,15 +13,17 @@
 # limitations under the License.
 #
 # SPDX-License-Identifier: Apache-2.0
-"""MNIST horizontal FL aggregator for PyTorch.
-
-The example below is implemented based on the following example from pytorch:
-https://github.com/pytorch/examples/blob/master/mnist/main.py.
-"""
+"""HIRE_FEMNIST coordinated horizontal hierarchical FL top level aggregator for PyTorch."""
 
 import logging
 import random
 import time
+import csv
+import os
+import os.path
+import warnings
+
+from PIL import Image
 
 from flame.mode.composer import Composer
 from flame.mode.tasklet import Loop, Tasklet
@@ -30,22 +32,136 @@ TAG_DISTRIBUTE = "distribute"
 TAG_AGGREGATE = "aggregate"
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from flame.config import Config
 from flame.dataset import Dataset
 from flame.mode.horizontal.coord_syncfl.top_aggregator import TopAggregator
-from torchvision import datasets, transforms
 import torchvision.models as tormodels
 
-from flame.fedscale_utils.femnist import FEMNIST
-from flame.fedscale_utils.utils_data import get_data_transform
+from fedscale.dataloaders.utils_data import get_data_transform
 from torch.autograd import Variable
 
 logger = logging.getLogger(__name__)
 log_file = "/mydata/image_cls-top_aggregator.log"
 file_handler = logging.FileHandler(log_file)
 logger.addHandler(file_handler)
+
+class FEMNIST():
+    """
+    FEMNIST dataloader. The implementation is based on FedScale
+
+    Args:
+        root (string): Root directory of dataset where ``MNIST/processed/training.pt``
+            and  ``MNIST/processed/test.pt`` exist.
+        train (bool, optional): If True, creates dataset from ``training.pt``,
+            otherwise from ``test.pt``.
+        download (bool, optional): If true, downloads the dataset from the internet and
+            puts it in root directory. If dataset is already downloaded, it is not
+            downloaded again.
+        transform (callable, optional): A function/transform that  takes in an PIL image
+            and returns a transformed version. E.g, ``transforms.RandomCrop``
+        target_transform (callable, optional): A function/transform that takes in the
+            target and transforms it.
+    """
+
+    classes = []
+
+    @property
+    def train_labels(self):
+        warnings.warn("train_labels has been renamed targets")
+        return self.targets
+
+    @property
+    def test_labels(self):
+        warnings.warn("test_labels has been renamed targets")
+        return self.targets
+
+    @property
+    def train_data(self):
+        warnings.warn("train_data has been renamed data")
+        return self.data
+
+    @property
+    def test_data(self):
+        warnings.warn("test_data has been renamed data")
+        return self.data
+
+    def __init__(self, root, meta_dir, partition_id, dataset='train', transform=None, target_transform=None, imgview=False):
+
+        self.data_file = dataset  # 'train', 'test', 'validation'
+        self.root = root
+        self.transform = transform
+        self.target_transform = target_transform
+        self.path = os.path.join(self.processed_folder, self.data_file)
+        self.meta_dir = meta_dir
+        self.partition_id = partition_id
+
+        # load data and targets
+        self.data, self.targets = self.load_file(self.path)
+        #self.mapping = {idx:file for idx, file in enumerate(raw_data)}
+
+        self.imgview = imgview
+
+    def __getitem__(self, index):
+        """
+        Args:
+            index (int): Index
+
+        Returns:
+            tuple: (image, target) where target is index of the target class.
+        """
+
+        imgName, target = self.data[index], int(self.targets[index])
+
+        # doing this so that it is consistent with all other datasets
+        # to return a PIL Image
+        img = Image.open(os.path.join(self.root, imgName))
+
+        # avoid channel error
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+
+        if self.transform is not None:
+            img = self.transform(img)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return img, target
+
+    def __len__(self):
+        return len(self.data)
+
+    @property
+    def raw_folder(self):
+        return self.root
+
+    @property
+    def processed_folder(self):
+        return self.root
+
+    def _check_exists(self):
+        return (os.path.exists(os.path.join(self.processed_folder,
+                                            self.data_file)))
+
+    def load_meta_data(self, path):
+        datas, labels = [], []
+
+        with open(path) as csv_file:
+            csv_reader = csv.reader(csv_file, delimiter=',')
+            line_count = 0
+            for row in csv_reader:
+                if line_count != 0:
+                    datas.append(row[1])
+                    labels.append(int(row[-1]))
+                line_count += 1
+
+        return datas, labels
+
+    def load_file(self, path):
+        datas, labels = self.load_meta_data(os.path.join(
+            self.meta_dir, self.data_file, 'client-'+str(self.partition_id)+'-'+self.data_file+'.csv'))
+
+        return datas, labels
 
 def override(method):
     return method
@@ -140,7 +256,8 @@ class PyTorchFemnistAggregator(TopAggregator):
 
     def initialize(self):
         """Initialize role."""
-        self.device = "cpu" # torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu")
 
         self.model = tormodels.__dict__["resnet18"](num_classes=62).to(device=self.device)
 
@@ -173,7 +290,7 @@ class PyTorchFemnistAggregator(TopAggregator):
     def evaluate(self) -> None:
         """Evaluate (test) a model."""
         self.EVAL_START_T = time.time()
-        test_loss, test_accuray, acc_5, testRes = test_pytorch_model(self.model, self.test_loader, device='cpu')
+        test_loss, test_accuray, acc_5, testRes = test_pytorch_model(self.model, self.test_loader, device=self.device)
         self.EVAL_END_T = time.time()
         self.eval_delay = self.EVAL_END_T - self.EVAL_START_T
 
@@ -239,9 +356,9 @@ class PyTorchFemnistAggregator(TopAggregator):
 
             task_increment_round = Tasklet("inc_round", self.increment_round)
 
-            task_end_of_training = Tasklet(
-                "inform_end_of_training", self.inform_end_of_training
-            )
+            # task_end_of_training = Tasklet(
+            #     "inform_end_of_training", self.inform_end_of_training
+            # )
 
             task_save_params = Tasklet("save_params", self.save_params)
 
