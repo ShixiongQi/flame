@@ -37,7 +37,7 @@ setup(
         "cloudpickle",
         "diskcache",
         "mlflow==2.0.1",
-        "paho-mqtt",
+        "paho-mqtt<2.0.0",
         "protobuf",
         "grpcio==1.51.1",
         "pydantic==1.10.5",
@@ -49,6 +49,7 @@ setup(
         "sentencepiece",
         "gdown",
         "librosa",
+        "fedscale"
     ],
     extras_require={
         "dev": ["pre-commit", "black", "flake8", "bandit", "mypy", "isort",],
